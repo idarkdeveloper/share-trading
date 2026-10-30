@@ -212,6 +212,7 @@ class Watcher:
         first_time = {t for t in self.real_holdings() if t not in polled}
         got, errors, changed = 0, [], False
         for t in tickers:
+            self._mark(f"announcements {t}")   # one stock's NSE read can wait on a timeout: progress per stock
             try:
                 rows = self._data.announcements(t, limit=20)   # 20, not 5: results days bring a burst of filings
             except Exception as e:  # noqa: BLE001
@@ -274,6 +275,7 @@ class Watcher:
         tickers = list(dict.fromkeys(held + real + recent))
         got, errors = 0, []
         for t in tickers:  # slow: network and tagging, with no State held open
+            self._mark(f"news {t}")   # a feed read (12 s) and Ollama tagging (up to 120 s) per stock: progress per stock
             try:
                 items = self._news.for_symbol(t)["items"]
             except Exception as e:  # noqa: BLE001
@@ -399,7 +401,9 @@ class Watcher:
             log.warning("positions unavailable for stop check: %s", e)
             return []
         prices = self._prices
-        bars_fn = (lambda sym: prices.history(sym, "1y")) if prices is not None else (lambda sym: [])
+        def bars_fn(sym: str) -> Any:
+            self._mark(f"trailing stops {sym}")   # an uncached price history is a network call: progress per stock
+            return prices.history(sym, "1y") if prices is not None else []
         hits = check_stops(positions, bars_fn)
         if hits and getattr(self.settings, "market", "in") == "in":   # no stop over a split / bonus ex-date
             try:

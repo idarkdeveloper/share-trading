@@ -632,6 +632,40 @@ def test_the_tick_marks_each_step_and_gives_the_main_check_its_allowance(setting
     assert any("watch step 'news' took 12" in r.getMessage() for r in caplog.records)
 
 
+def test_the_slow_per_stock_loops_mark_progress_for_each_stock(settings):
+    # The news loop reads a feed (12 s) and tags new headlines with Ollama (up to 120 s) for EVERY stock in one stretch:
+    # a few stocks at the open outlast the 3-minute in-hours limit unless each one counts as progress.
+    seen: list[str] = []
+    w = Watcher(settings, every=60)
+    w._tickers_by_reason = lambda: (["AAA", "BBB"], [])
+    w.real_holdings = lambda: []
+    w.interesting_tickers = lambda: ["AAA", "BBB"]
+
+    def for_symbol(t):
+        seen.append(w._step)
+        return {"items": []}
+    w._news = SimpleNamespace(tagger=SimpleNamespace(name="ollama:x"), for_symbol=for_symbol)
+
+    def announcements(t, limit=20):
+        seen.append(w._step)
+        return []
+    w._data = SimpleNamespace(announcements=announcements)
+    w.poll_announcements()
+    w.poll_news()
+    assert seen == ["announcements AAA", "announcements BBB", "news AAA", "news BBB"]
+    steps: list[str] = []
+
+    class Prices:
+        def history(self, sym, period):
+            steps.append(w._step)
+            return []
+    w._prices, w._groww_paused = Prices(), False
+    held = [SimpleNamespace(symbol=t, qty=1, current_price=100.0, avg_entry_price=100.0) for t in ("AAA", "BBB")]
+    w._broker = SimpleNamespace(positions=lambda: held, name="local-paper")
+    w.check_trailing_stops()
+    assert steps == ["trailing stops AAA", "trailing stops BBB"]
+
+
 def test_reported_error_pings_fail_with_the_text_and_url_off_means_nothing():
     now = [0.0]
     s = Session()
