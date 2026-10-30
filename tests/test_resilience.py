@@ -105,8 +105,8 @@ def test_the_watch_loop_hands_the_heartbeat_a_market_window_test(settings):
     got = {}
 
     class HB:
-        def start(self, progress, *, stall_s, stop, window=None, loop_every=None):
-            got.update(window=window, loop_every=loop_every)
+        def start(self, progress, *, stall_s, stop, window=None, loop_every=None, where=None, allowance=None):
+            got.update(window=window, loop_every=loop_every, where=where, allowance=allowance)
             w._stop.set()
 
         def stop(self):
@@ -115,6 +115,7 @@ def test_the_watch_loop_hands_the_heartbeat_a_market_window_test(settings):
     w = Watcher(settings, every=60, awake=None, heartbeat=HB(), holidays=Holidays())
     w.run_forever()
     assert got["loop_every"] == 60 and isinstance(got["window"](), bool)
+    assert got["where"]() is None and got["allowance"]() is None   # between ticks: no step to name, no longer limit
 
 
 # ------------------------------------------------------------------ circuit breaker

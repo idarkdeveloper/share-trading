@@ -6,7 +6,9 @@ Works with healthchecks.io, Better Stack and UptimeRobot heartbeat URLs. The pin
 the start and end of every iteration, and the thread pings "ok" only while that stamp is recent (3 loop intervals, at
 least 20 minutes). Only the stall threshold depends on the hour: in the market window (09:15 to 15:30 IST on a trading day; the watch
 loop supplies the test, from cached holiday data, never the network) the loop counts as stalled after
-max(3 minutes, 3 loop intervals); outside it after max(3 loop intervals, 20 minutes). A stalled loop pings ``/fail`` with "watch loop stalled N min"; a tick that raised pings ``/fail``
+max(3 minutes, 3 loop intervals); outside it after max(3 loop intervals, 20 minutes). A step that is known to run
+long (the main check, which may include a Claude run) declares a longer allowance, and a stall names the step it is
+in: "watch loop stalled N min in check". A stalled loop pings ``/fail`` with "watch loop stalled N min"; a tick that raised pings ``/fail``
 with the error text at once. After a failure the next healthy moment pings "ok" at once.
 
 ``/fail`` (a POST with the error as body, the healthchecks.io convention) is only sent to hc-ping.com hosts, or when
@@ -61,6 +63,8 @@ class Heartbeat:
         self._wake = threading.Event()
         self._thread: threading.Thread | None = None
         self._progress: Callable[[], float | None] = lambda: None
+        self._where: Callable[[], str | None] = lambda: None        # the step the loop is in (named in a stall's fail text)
+        self._allow: Callable[[], float | None] = lambda: None      # seconds the current step may go without progress
         self._stall = MIN_STALL_S
         self._loop_every = 60.0
         self._window: Callable[[], bool] | None = None
@@ -77,7 +81,19 @@ class Heartbeat:
     def _stall_now(self) -> float:
         """3 minutes in the market window (or 3 loop intervals when the loop is slower than a minute), else the
         20 minute rule."""
-        return max(WINDOW_STALL_S, 3 * self._loop_every) if self._in_window() else self._stall
+        base = max(WINDOW_STALL_S, 3 * self._loop_every) if self._in_window() else self._stall
+        try:
+            allow = self._allow()
+        except Exception:  # noqa: BLE001
+            allow = None
+        return max(base, float(allow)) if allow else base
+
+    def _where_now(self) -> str:
+        try:
+            w = self._where()
+        except Exception:  # noqa: BLE001
+            w = None
+        return f" in {w}" if w else ""
 
     # -- one request ---------------------------------------------------------------
     def ping(self, error: str | None = None) -> bool:
@@ -132,7 +148,7 @@ class Heartbeat:
             if age is not None and age >= self._stall_now():
                 if self._last_fail is not None and self._clock() - self._last_fail < 5 * self.every:   # one fail per five ping periods (5 minutes by default)
                     return "skip"   # still stalled, and a fail went out within the last interval
-                err = f"watch loop stalled {int(age // 60)} min"
+                err = f"watch loop stalled {int(age // 60)} min{self._where_now()}"
         if err is not None:
             self._failing = True
             self._last_fail = self._clock()
@@ -146,10 +162,16 @@ class Heartbeat:
         return "ok"
 
     def start(self, progress: Callable[[], float | None], *, stall_s: float, stop: threading.Event,
-              window: Callable[[], bool] | None = None, loop_every: float = 60.0) -> None:
+              window: Callable[[], bool] | None = None, loop_every: float = 60.0,
+              where: Callable[[], str | None] | None = None,
+              allowance: Callable[[], float | None] | None = None) -> None:
         if not self.url or (self._thread and self._thread.is_alive()):
             return
         self._progress, self._stall = progress, stall_s
+        if where is not None:
+            self._where = where
+        if allowance is not None:
+            self._allow = allowance
         self._window, self._loop_every = window, float(loop_every)
         self._stop = stop
 

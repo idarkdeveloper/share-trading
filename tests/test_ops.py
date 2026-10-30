@@ -589,6 +589,49 @@ def test_beat_ok_stalled_fail_and_immediate_recovery():
     assert h.beat() == "ok" and s.calls[-1][0] == "GET"   # healthy again: ok at once
 
 
+def test_a_stall_names_its_step_and_a_step_can_ask_for_a_longer_allowance():
+    # 30 Oct 2026: "watch loop stalled 3 min" every morning at the open, with nothing to say which step it was.
+    now = [10_000.0]
+    s = Session()
+    h = hb(s, now, lambda: now[0] - 200)   # 200 s without progress, inside the market window (limit 180 s)
+    h._window, h._where = (lambda: True), (lambda: "check")
+    assert h.beat() == "fail" and s.calls[-1][2]["data"] == b"watch loop stalled 3 min in check"
+    s2 = Session()
+    h2 = hb(s2, now, lambda: now[0] - 200)
+    h2._window = lambda: True   # no step named: the text is as it always was
+    assert h2.beat() == "fail" and s2.calls[-1][2]["data"] == b"watch loop stalled 3 min"
+    s3 = Session()
+    age = [200.0]
+    h3 = hb(s3, now, lambda: now[0] - age[0])
+    h3._window, h3._where, h3._allow = (lambda: True), (lambda: "check"), (lambda: 600.0)
+    assert h3.beat() == "ok"   # the check may run up to ten minutes
+    age[0] = 650.0
+    assert h3.beat() == "fail" and s3.calls[-1][2]["data"] == b"watch loop stalled 10 min in check"
+    h3._allow = lambda: (_ for _ in ()).throw(RuntimeError("x"))   # a broken callback falls back to the default limit
+    h3._last_fail = None
+    assert h3.beat() == "fail"
+
+
+def test_the_tick_marks_each_step_and_gives_the_main_check_its_allowance(settings, caplog):
+    from trading_agent.watch import CHECK_ALLOWANCE_S
+    seen: dict[str, object] = {}
+
+    def check():
+        seen["step"], seen["allow"] = w._step, w._step_allow
+        return {}
+    w = Watcher(settings, every=60, check_fn=check)
+    w.groww_paused = lambda now=None: False
+    before = w._progress
+    w.tick(force=True)
+    assert seen == {"step": "check", "allow": CHECK_ALLOWANCE_S}
+    assert w._step == "idle" and w._step_allow is None and w._progress >= before   # the tick ends idle
+    with caplog.at_level(logging.WARNING):
+        w._mark("news")
+        w._step_at -= 120   # the news step "ran" for two minutes
+        w._mark("idle")
+    assert any("watch step 'news' took 12" in r.getMessage() for r in caplog.records)
+
+
 def test_reported_error_pings_fail_with_the_text_and_url_off_means_nothing():
     now = [0.0]
     s = Session()

@@ -51,6 +51,9 @@ def _plain(text: str) -> str:
 
 
 MARKET_DATA_BUDGET_S = 30.0   # network time the once-a-day NSE reads may spend in one tick
+CHECK_ALLOWANCE_S = 600.0   # the main check (NSE deals, and a Claude run when there is something new) may go this long
+#                             without a progress mark before the heartbeat calls it a stall
+SLOW_STEP_S = 60.0   # a step of the tick that takes longer than this is logged with its name
 
 
 class _CachedCalendar:
@@ -125,6 +128,9 @@ class Watcher:
         self._tick_finished: str | None = None
         self._last_error: str | None = None
         self._progress = time.monotonic()   # stamped at the start and end of every loop iteration (the heartbeat reads it)
+        self._step = "idle"   # the step of the tick the loop is in (named in a stall's fail text)
+        self._step_at = time.monotonic()
+        self._step_allow: float | None = None   # seconds this step may go without progress, if longer than the default
         self.last_tick: dict[str, Any] | None = None
         self.started_at: str | None = None
 
@@ -645,6 +651,16 @@ class Watcher:
         except Exception:  # noqa: BLE001 - never stops the watch
             log.exception("app feed failed")
 
+    def _mark(self, step: str, allow: float | None = None) -> None:
+        """Progress: the loop has finished the previous step and starts ``step`` ("idle" between ticks). Stamps the
+        heartbeat's progress clock, names the step for a stall's fail text, and logs a step that ran longer than
+        SLOW_STEP_S, so the journal says which one it was."""
+        now = time.monotonic()
+        if self._step != "idle" and now - self._step_at >= SLOW_STEP_S:
+            log.warning("watch step '%s' took %d s", self._step, int(now - self._step_at))
+        self._step, self._step_at, self._step_allow = step, now, allow
+        self._progress = now
+
     def tick(self, force: bool = False) -> dict[str, Any]:
         now = datetime.now(self.tz)
         halted = killswitch.reason(getattr(self.settings, "state_dir", None), "run the watch")
@@ -659,13 +675,17 @@ class Watcher:
             log.info("HALT released: the watch runs again")
             self._halt_logged = False
         info: dict[str, Any] = {"at": now.isoformat(timespec="seconds"), "in_window": self.market_window_open(now)}
+        self._mark("digest")
         if self._digest is not None:  # on its own schedule, whatever the market window; returns at once
             try:
                 info["digest"] = self._digest.tick(now)
             except Exception:  # noqa: BLE001 - the emails never stop the watch
                 log.exception("daily email check failed")
+        self._mark("market data")
         info["market_data"] = self.poll_market_data(now)
+        self._mark("insider book")
         info["insider"] = self.poll_insider(now)
+        self._mark("scheduled jobs")
         if getattr(self.settings, "market", "in") == "in":   # from 08:30 on an ex-date: rescale the paper accounts
             try:
                 from .corp_actions import normalise_all
@@ -717,15 +737,18 @@ class Watcher:
             info["skipped"] = True
             self.last_tick = info
             return info
+        self._mark("broker login")
         alerts_only = (not self._groww_paused and self.ensure_broker() is None
                        and self._broker_factory is not None)
         if alerts_only:
             info["alerts_only"] = "Groww is unavailable: stop and order checks are paused"
             info["new_deals_unanalysed"] = self.poll_deals_blocked()
+        self._mark("day brake")
         if not alerts_only:
             braked = self.check_day_brake(now)
             if braked:
                 info["day_brake"] = braked
+        self._mark("check", CHECK_ALLOWANCE_S)
         try:
             if self._check_fn is not None and not alerts_only and not self._groww_paused:
                 result = self._check_fn()
@@ -733,14 +756,15 @@ class Watcher:
         except Exception as e:  # noqa: BLE001
             log.exception("watch check failed")
             info["check_error"] = f"{type(e).__name__}: {e}"
-        self._progress = time.monotonic()   # a long tick that keeps moving is not a stall: stamp between the sub-steps
+        self._mark("announcements")   # a long tick that keeps moving is not a stall: mark between the sub-steps
         info["new_announcements"] = self.poll_announcements()
+        self._mark("news")
         info["negative_news"] = self.poll_news()
-        self._progress = time.monotonic()
+        self._mark("trailing stops")
         info["stop_hits"] = self.check_trailing_stops()
-        self._progress = time.monotonic()
+        self._mark("live sync")
         live = self.sync_live()
-        self._progress = time.monotonic()
+        self._mark("idle")
         if live is not None:
             info["live"] = live
         self.ticks += 1
@@ -774,7 +798,9 @@ class Watcher:
                 from .safety import market_open
                 cached = _CachedCalendar(self.holidays)   # the heartbeat thread must never make a network call
                 self._heartbeat.start(lambda: self._progress, stall_s=stall_after(self.every), stop=self._stop,
-                                      window=lambda: market_open(datetime.now(IST), cached), loop_every=self.every)
+                                      window=lambda: market_open(datetime.now(IST), cached), loop_every=self.every,
+                                      where=lambda: None if self._step == "idle" else self._step,
+                                      allowance=lambda: self._step_allow)
             except Exception:  # noqa: BLE001 - the dead-man ping never stops the watch
                 log.warning("heartbeat thread did not start")
         while not self._stop.is_set():
@@ -790,7 +816,7 @@ class Watcher:
             except Exception as e:  # noqa: BLE001
                 log.exception("watch tick failed")
                 error = raised = f"{type(e).__name__}: {e}"
-            self._progress = time.monotonic()
+            self._mark("idle")
             self._tick_finished = datetime.now(self.tz).isoformat(timespec="seconds")
             self._last_error = error
             self._write_alive(error, force=True)
