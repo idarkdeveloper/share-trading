@@ -365,6 +365,13 @@ tick, so a long tick that keeps moving is not a stall). If the loop has not move
 (09:15 to 15:30 IST on a trading day; 3 x the check interval if that is longer), or for max(3 x the check interval, 20
 minutes) outside it, the thread sends `/fail` with "watch loop stalled N min" instead of an
 ok ping, and a tick that raised sends `/fail` with the error text at once. The next healthy moment pings ok at once.
+The loop marks progress between the steps of a tick and names the step it is in, so a stall reads "watch loop stalled
+3 min in broker login" (steps: digest, market data, insider book, scheduled jobs, broker login, day brake, check,
+then announcements, news and trailing stops once per stock, as "news RELIANCE", and live sync). Progress is marked per
+stock because each stock's news read (12 s) and Ollama tagging (up to 120 s) can be slow at the open, so a long list of
+stocks is busy, not stalled. The main check, which fetches the deals and may run Claude on anything new, is allowed 10
+minutes before it counts as a stall. A step that runs longer than a minute is logged with its name:
+`journalctl -u trading-agent-watch | grep "watch step"` shows which one it was and how long it took.
 `/fail` is sent only to hc-ping.com addresses (or when `HEARTBEAT_FAIL=true`); other providers just stop getting
 pings, which their own grace period turns into an alert. The URL and the bot token are never logged (redacted even
 with `-v`), only "heartbeat ok" / "heartbeat failed". After changing `HEARTBEAT_URL` or the Telegram settings, restart

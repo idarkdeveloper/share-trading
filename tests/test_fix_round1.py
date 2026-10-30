@@ -198,7 +198,7 @@ def test_the_watch_hands_the_heartbeat_the_cached_calendar(s):
             return True
 
     class HB:
-        def start(self, progress, *, stall_s, stop, window=None, loop_every=None):
+        def start(self, progress, *, stall_s, stop, window=None, loop_every=None, **kw):
             got["inside"] = window()
             w._stop.set()
 
