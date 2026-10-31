@@ -1826,3 +1826,15 @@ svg.lk-mini.down .lk-fill { fill: color-mix(in srgb, var(--color-loss) 14%, tran
 @media (max-width: 700px) { .needs { padding: 10px 14px; margin-bottom: 10px; } .needs-chip { min-height: 44px; } }
 
 .eq-line { flex: 0 0 100%; margin: 6px 0 0; font-size: 14px; line-height: 1.5; color: var(--color-muted); }
+
+/* Holdings on a phone: the row shows name, value and profit/loss; a tap opens the stop, sell test and full view */
+.row-more { display: none; }
+@media (max-width: 700px) {
+  #mp-card #mp-rows tr[data-open-stock] { cursor: pointer; }
+  #mp-card #mp-rows tr:not(.open) td.prot-cell,
+  #mp-card #mp-rows tr:not(.open) .stock-cell > div:not(.sym-line):not(.l2):not(.hname):not(.hold-line) { display: none !important; }
+  #mp-card #mp-rows tr.open .row-more { display: block; margin-top: 4px; }
+  #mp-card #mp-rows tr.open .row-more .small { min-height: 44px; }
+  #mp-card #mp-rows td.num:nth-child(8)::after { content: "BE"; font-size: 12px; color: var(--color-muted); margin-left: 4px; }
+  #mp-card #mp-rows tr.open td.num:nth-child(8)::after { content: "B4"; }
+}

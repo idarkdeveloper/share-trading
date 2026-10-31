@@ -1401,6 +1401,8 @@
     return `<div class="stop-state ${esc(p.tone)}" title="${esc(protTitle(sym))}"><span class="dot" aria-hidden="true"></span>${esc(short)}<span class="sr-only">: ${esc(p.text)}</span></div>`
       + (sub ? `<div class="sub l2">${esc(sub)}</div>` : "") + (p.warning ? `<div class="stop-warn">${SAFE.icon("alert")}<span>${esc(p.warning)}</span></div>` : "");
   }
+  const OPEN_ROWS = new Set();   // phone: holdings rows the user has expanded (kept across refreshes)
+  const isPhone = () => typeof window.matchMedia === "function" && window.matchMedia("(max-width: 700px)").matches;
   function renderMyPortfolio(m, force){
     MP = m; if(S) renderTiles();
     if(S && S.settings && typeof paintDeals === "function") paintDeals(investorsOf(S.settings));
@@ -1436,13 +1438,13 @@
       + stat("Return", spct(m.pl_pct), "vs what you paid", tone(m.pl_pct));
     const total = m.holdings.reduce((t, h) => t + (h.value || 0), 0);
     const sorted = m.holdings.slice().sort((x, y) => (y.value || 0) - (x.value || 0));   // biggest first, as on Groww
-    if(!keepRows) rows.innerHTML = sorted.length ? sorted.map(h => { const dm = dayMove(h); return `<tr data-open-stock="${esc(h.symbol)}">
+    if(!keepRows) rows.innerHTML = sorted.length ? sorted.map(h => { const dm = dayMove(h), isOpen = OPEN_ROWS.has(h.symbol) || (sellEdit && sellEdit.source === "groww" && sellEdit.symbol === h.symbol); return `<tr data-open-stock="${esc(h.symbol)}"${isOpen ? ' class="open"' : ""}>
         <td class="stock-cell"><div class="sym-line"><a href="#" data-lookup="${esc(h.symbol)}" class="sym" title="${esc(h.name || h.symbol)}">${esc(h.symbol)}</a>${h.kind === "bond" ? ` <span class="pill warn mini" title="bond${h.maturity ? " maturing " + esc(h.maturity) : ""}">Bond</span>` : ""}${h.exchange === "BSE" ? ' <span class="pill mini">BSE</span>' : ""}${(MP.bands || {})[h.symbol] ? ` <span class="pill mini" title="NSE daily price band">Band ${esc(MP.bands[h.symbol])}</span>` : ""}${((MP.filter_flags || {})[h.symbol] || []).map(f => ` <span class="pill warn mini" title="Review flag from the Indian-market filters; the agent never sells on it">${esc(f)}</span>`).join("")}${((MP.corp_actions || {})[h.symbol] || []).map(f => ` <span class="pill warn mini" title="Corporate action within 7 days: the GTT stop-loss is paused over the ex-date and re-set at the adjusted level">${esc(f)}</span>`).join("")}${insiderChip(h.symbol)}${fundsChip(h.symbol)}</div>${h.name ? `<div class="sub hname" title="${esc(h.name)}">${esc(h.name)}</div>` : ""}
           <div class="sub l2">${(() => { const rest = [total && h.value != null ? `${(h.value / total * 100).toFixed(1)}%` : "", h.sellable_qty < h.qty ? `${h.sellable_qty} free to sell` : ""].filter(Boolean).join(" · ");
           return rest; })()}</div>
           <div class="hold-line" title="shares (or units) owned × average buy price">${(() => { const rest = [total && h.value != null ? `${(h.value / total * 100).toFixed(1)}%` : "", h.sellable_qty < h.qty ? `${h.sellable_qty} free to sell` : ""].filter(Boolean);
           const unit = h.kind === "bond" ? "units" : Number(h.qty) === 1 ? "share" : "shares";
-          return [`<span class="n">${h.qty != null ? esc(h.qty) : "n/a"}</span> ${unit} × <span class="n">${h.avg_price != null ? inr(h.avg_price, 2) : "n/a"}</span>`].concat(rest, h.invested != null ? [`invested <span class="n">${inr(h.invested)}</span>`] : []).join(" · "); })()}</div>${h.price != null && MODE === "demo" ? `<div>${sellBtn("groww", h.symbol)}</div>` : ""}</td>
+          return [`<span class="n">${h.qty != null ? esc(h.qty) : "n/a"}</span> ${unit} × <span class="n">${h.avg_price != null ? inr(h.avg_price, 2) : "n/a"}</span>`].concat(rest, h.invested != null ? [`invested <span class="n">${inr(h.invested)}</span>`] : []).join(" · "); })()}</div>${h.price != null && MODE === "demo" ? `<div>${sellBtn("groww", h.symbol)}</div>` : ""}<div class="row-more"><button type="button" class="small" data-open-full="${esc(h.symbol)}">Open full view →</button></div></td>
         <td class="spark-col">${sparkSvg(h.symbol)}</td>
         <td class="num nowrap hold-col">${h.qty != null ? esc(h.qty) : "n/a"}</td><td class="num nowrap hold-col">${h.avg_price != null ? inr(h.avg_price, 2) : "n/a"}</td>
         <td class="num nowrap">${h.price != null ? inr(h.price, 2) + (h.price_date ? `<div class="sub" style="font-size:12px" title="${esc(h.price_source || "BSE close")}: the bond's last traded price">last traded ${esc(new Date(h.price_date + "T00:00:00").toLocaleDateString("en-IN", {day: "numeric", month: "short"}))}</div>` : "") : '<span class="sub">no price</span>'}</td>
@@ -2118,7 +2120,10 @@
     const b = ev.target.closest("button");
     if(!b){   // a click anywhere on a holding or deal row opens that stock (its ticker link is the keyboard way in)
       const tr = ev.target.closest("tr[data-open-stock]");
-      if(tr && !ev.target.closest("a, input, select, textarea, label, summary")) lookup(tr.dataset.openStock);
+      if(tr && !ev.target.closest("a, input, select, textarea, label, summary, button")){
+        if(isPhone() && tr.closest("#mp-rows")){ const k = tr.dataset.openStock; if(OPEN_ROWS.has(k)) OPEN_ROWS.delete(k); else OPEN_ROWS.add(k); tr.classList.toggle("open"); }   // phone: a tap opens the row's details
+        else lookup(tr.dataset.openStock);
+      }
       return;
     }
     if(b.dataset.wsTab){ goWorkspace(b.dataset.wsTab); return; }
