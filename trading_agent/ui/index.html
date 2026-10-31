@@ -67,6 +67,7 @@
 
   <!-- ===================== Overview ===================== -->
   <section class="ws-panel" id="ws-overview" data-ws="overview" role="tabpanel" aria-labelledby="wst-overview">
+    <section class="needs" id="needs" aria-label="What needs you today"><span class="needs-title">What needs you today</span><span class="needs-chips" id="needs-chips"></span></section>
     <div class="ov-hero" id="mp-charts" hidden>
       <section class="card mp-chart mp-equity" aria-labelledby="mp-eq-h"><h3 id="mp-eq-h" class="sr-only">Portfolio value</h3>
         <div class="eq-head" id="mp-eq-head"></div>
@@ -708,6 +709,7 @@
       const h = await api("/api/health"), c = h.counts || {};
       $("hl-list").innerHTML = h.sources.map(healthItem).join("");
       $("hl-sub").textContent = `${c.failing || 0} failing · ${c.late || 0} late · ${c.ok || 0} ok · ${c.off || 0} not configured · ${hlTime(h.at)}`;
+      HEALTH_FAILING = c.failing || 0; renderNeeds();
       const badge = $("ws-health-count"); badge.hidden = !c.failing; badge.textContent = c.failing ? String(c.failing) : "";
       badge.title = c.failing ? `${c.failing} data source${c.failing === 1 ? "" : "s"} failing` : "";
       $("wst-health").setAttribute("aria-label", c.failing ? `Health, ${c.failing} failing` : "Health");
@@ -786,7 +788,25 @@
             {n: nr, label: nr === 1 ? "new recommendation" : "new recommendations", go: "recs"},
             {n: ns, label: ns === 1 ? "practice stop hit" : "practice stops hit", go: "practice"}].filter(x => x.n);
   }
+  // "What needs you today": what is true now (not what changed since a visit): open recommendations, big losers, failing sources, a tripped friction gate.
+  let HEALTH_FAILING = 0, FRICTION_TRIPPED = false;
+  function needsItems(){
+    const out = [], day = 864e5;
+    const nr = S ? (S.recommendations || []).filter(r => !r.dismissed && (r.action === "buy" || r.action === "sell") && Date.now() - Date.parse(r.at) < 3 * day).length : 0;
+    if(nr) out.push({n: nr, label: nr === 1 ? "recommendation from the last 3 days" : "recommendations from the last 3 days", go: "recs"});
+    const down = MODE === "live" && MP && MP.holdings ? MP.holdings.filter(h => h.pl_pct != null && h.pl_pct <= -0.10).length : 0;
+    if(down) out.push({n: down, label: down === 1 ? "holding is down 10% or more" : "holdings are down 10% or more", go: "portfolio"});
+    if(HEALTH_FAILING) out.push({n: HEALTH_FAILING, label: HEALTH_FAILING === 1 ? "data source failing" : "data sources failing", go: "health"});
+    if(FRICTION_TRIPPED) out.push({n: "!", label: "friction gate tripped", go: "forward"});
+    return out;
+  }
+  function renderNeeds(){
+    const items = needsItems(), el = $("needs-chips"); if(!el) return;
+    el.innerHTML = items.length ? items.map(x => `<button type="button" class="needs-chip" data-since-go="${x.go}"><b>${x.n}</b> ${esc(x.label)} →</button>`).join("")
+      : '<span class="needs-clear"><i aria-hidden="true"></i>Nothing needs you right now</span>';
+  }
   function renderSince(){
+    renderNeeds();
     const items = sinceItems();
     $("since").hidden = !items.length;
     $("since-chips").innerHTML = items.map(x => `<button type="button" class="since-chip" data-since-go="${x.go}"><b>${x.n}</b> ${esc(x.label)} →</button>`).join("");
@@ -1434,7 +1454,7 @@
         <td></td><td class="num hold-col"></td><td class="num hold-col">${m.invested != null ? inr(m.invested) : ""}</td><td></td><td class="num nowrap ${tone(today)}">${today == null ? "" : sinr(today)}</td><td class="num">${inr(m.value)}</td>
         <td class="num"><div class="${tone(m.pl)}">${sinr(m.pl)}</div><div class="l2 ${tone(m.pl_pct)}">${spct(m.pl_pct)}</div></td>${MODE === "demo" ? "" : "<td></td>"}</tr>` : "";
     loadSparks(m.holdings);
-    paintHero();
+    paintHero(); renderNeeds();
   }
   // Allocation by sector (a donut) and profit/loss by holding (bars), drawn from the holdings already on the page.
   // The sector is NSE's industry from the NIFTY 500 list (/api/portfolio-sectors); a bond is "Bonds", anything not in the list "Other".
@@ -1517,6 +1537,7 @@
   function renderFriction(f){   // the forward test's friction gate: a banner on Live and Demo, never a setting change
     const b = $("friction-banner"); if(!b) return;
     const g = f && f.telemetry && f.telemetry.gate;
+    FRICTION_TRIPPED = !!(g && g.tripped); renderNeeds();
     b.hidden = !(g && g.tripped);
     b.textContent = g && g.tripped ? g.text : "";
   }

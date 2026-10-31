@@ -1814,3 +1814,13 @@ svg.lk-mini.down .lk-fill { fill: color-mix(in srgb, var(--color-loss) 14%, tran
 @media (max-width: 520px) { .hdr #lastcheck { display: none; } }
 
 @media (max-width: 700px) { footer { padding-right: 76px; } }   /* the Ask mic floats over the right edge */
+
+/* What needs you today: a calm strip above the hero; chips only when something is true now */
+.needs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 12px 18px; margin-bottom: 14px; border: 1px solid var(--color-divider); border-radius: var(--radius-lg); background: var(--color-surface); }
+.needs-title { font-size: 12px; font-weight: 600; letter-spacing: .5px; text-transform: uppercase; color: var(--color-muted); margin-right: 4px; }
+.needs-chips { display: contents; }
+.needs-chip { min-height: 32px; padding: 0 12px; font-size: 13px; font-weight: 400; border-radius: 999px; gap: 6px; }
+.needs-chip b { color: var(--color-accent); font-weight: 700; }
+.needs-clear { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--color-muted); }
+.needs-clear i { width: 8px; height: 8px; border-radius: 50%; background: var(--color-profit); }
+@media (max-width: 700px) { .needs { padding: 10px 14px; margin-bottom: 10px; } .needs-chip { min-height: 44px; } }
