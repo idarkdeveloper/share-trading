@@ -234,7 +234,7 @@ window.TA = (function(){
       parts.push(cell("Market cap", q && !q.error ? q.market_cap_text : null));
       parts.push(cell("Dividend yield", q && !q.error ? q.dividend_yield_text : null));
     }
-    parts.push(`<div class="qcell"><div class="label">NSE price band</div><div class="qval">${r.band ? `<span class="pill ${r.band_skip ? "bad" : ""}" title="${esc(r.band_note || "NSE daily price band")}" style="font-size:11px">${esc(r.band)}</span>` : "n/a"}</div></div>`);
+    parts.push(`<div class="qcell"><div class="label">NSE price band</div><div class="qval">${r.band ? `<span class="pill ${r.band_skip ? "bad" : ""}" title="${esc(r.band_note || "NSE daily price band")}" style="font-size:12px">${esc(r.band)}</span>` : "n/a"}</div></div>`);
     const lo = q && !q.error ? q.week52_low : null, hi = q && !q.error ? q.week52_high : null, pos = rangePos(r.price, lo, hi);
     const range = `<div class="qrange"><div class="label">52-week range</div>${lo != null && hi != null ? `<div class="qtrack" role="img" aria-label="52-week range ${esc(inr(lo, 2))} to ${esc(inr(hi, 2))}${pos != null ? ", price is " + Math.round(pos * 100) + "% of the way up" : ""}"><span class="qdot" style="left:${pos == null ? 50 : (pos * 100).toFixed(1)}%${pos == null ? ";display:none" : ""}"></span></div><div class="qends mono"><span>${esc(inr(lo, 2))}</span><span>${esc(inr(hi, 2))}</span></div>` : `<div class="qval">n/a</div>`}</div>`;
     const foot = !q ? "Loading figures…" : q.error ? "Figures unavailable: " + q.error : `Figures from ${q.source}, fetched ${quoteAge(q.fetched_at, now)}. Price band from the NSE list.`;
@@ -402,7 +402,7 @@ window.TA = (function(){
     const t = `${a.category || ""} ${a.text || ""}`, bad = ANN_BAD.test(t), good = ANN_GOOD.test(t);
     return bad && !good ? {cls: "bad", label: "▼ Negative"} : good && !bad ? {cls: "ok", label: "▲ Positive"} : {cls: "", label: "● Neutral"};
   };
-  const annChip = (a) => { const s = annTone(a); return `<span class="pill ${s.cls}" style="font-size:11px;padding:1px 7px" title="A keyword guess from the title and text, not advice; it can be wrong">${s.label}</span> `; };
+  const annChip = (a) => { const s = annTone(a); return `<span class="pill ${s.cls}" style="font-size:12px;padding:1px 7px" title="A keyword guess from the title and text, not advice; it can be wrong">${s.label}</span> `; };
   const newsNeedsLabels = (n) => !!n && !n.demo && n.tagger !== "none" && (n.items || []).some(i => !i.sentiment);
   // "poll" = ask again in NEWS_POLL_MS; "stop" = all tagged, no tagger, two minutes passed, or another stock was looked up.
   const newsPollNext = (n, startedAt, now, stillCurrent) =>

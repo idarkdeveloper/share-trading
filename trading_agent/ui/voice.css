@@ -16,7 +16,7 @@
   border-radius: 26px; background: var(--color-surface); border: 1px solid var(--color-divider); box-shadow: var(--shadow-md); }
 .va-input { flex: 1 1 auto; min-width: 0; width: auto; min-height: 44px; border: 0; background: transparent; color: var(--color-text); font-size: 16px; padding: 0; }
 .va-input:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: var(--radius-sm); }
-.va-kbd { flex: none; font-size: 11px; color: var(--color-muted); border: 1px solid var(--color-divider); border-radius: var(--radius-sm); padding: 1px 5px; }
+.va-kbd { flex: none; font-size: 12px; color: var(--color-muted); border: 1px solid var(--color-divider); border-radius: var(--radius-sm); padding: 1px 5px; }
 .va-mic { flex: none; width: 44px; height: 44px; min-height: 44px; padding: 0; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
   background: var(--color-accent); color: var(--color-bg); border-color: var(--color-accent); position: relative; }
 .va-mic:hover { background: var(--color-accent-2); }
@@ -62,7 +62,7 @@
 .va-steps { list-style: none; margin: 0; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; border-radius: 12px; background: var(--color-surface); border: 1px solid var(--color-divider); }
 .va-step { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--color-muted); }
 .va-step.done, .va-step.now { color: var(--color-text); }
-.va-dot { flex: none; width: 18px; height: 18px; box-sizing: border-box; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; border: 2px solid var(--color-divider); }
+.va-dot { flex: none; width: 18px; height: 18px; box-sizing: border-box; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; border: 2px solid var(--color-divider); }
 .va-step.done .va-dot { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-bg); }
 .va-step.now .va-dot { border-color: var(--color-divider); border-top-color: var(--color-accent); border-right-color: var(--color-accent); animation: va-spin .8s linear infinite; }
 .va-who { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--color-muted); }
@@ -89,10 +89,10 @@
 .va-erra { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
 .va-btn { min-height: 44px; padding: 0 16px; border-radius: var(--radius-md); }
 .va-hist { display: flex; flex-direction: column; gap: 16px; }
-.va-day { font-size: 11px; letter-spacing: .8px; text-transform: uppercase; color: var(--color-muted); text-align: center; }
+.va-day { font-size: 12px; letter-spacing: .8px; text-transform: uppercase; color: var(--color-muted); text-align: center; }
 .va-turn { display: flex; flex-direction: column; gap: 8px; }
 .va-qrow { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.va-at { font-size: 11px; color: var(--color-muted); }
+.va-at { font-size: 12px; color: var(--color-muted); }
 .va-qrow .va-q { align-self: auto; }
 .va-arow { display: flex; align-items: flex-start; gap: 4px; }
 .va-a { flex: 1; font-size: 14px; line-height: 1.5; padding-top: 10px; }

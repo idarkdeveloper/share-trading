@@ -165,9 +165,9 @@
       return `<div class="sp-name">${esc(name)}</div>
         ${r && r.matched_from ? `<div class="sub" style="font-size:12px">Matched "${esc(r.matched_from)}" to ${esc(st.ticker)}</div>` : ""}
         <div class="sp-code row" style="gap:8px"><span class="sp-codetxt">${esc(st.ticker)} · ${esc(foreign() ? (r && r.exchange) || "" : st.exchange)}</span>
-          ${foreign() ? `<span class="pill" style="font-size:11px">${esc((r && r.market_name) || "")} · view only</span>` : `<span class="seg sp-exch" role="group" aria-label="Exchange">${exch}</span>`}
-          ${r && r.band ? `<span class="pill ${r.band_skip ? "bad" : ""}" title="${esc(r.band_note || "NSE daily price band")}" style="font-size:11px">Band ${esc(bandText(r.band))}</span>` : ""}
-          ${(r && r.filter_flags || []).map(f => `<span class="pill ${r.filter_block ? "bad" : "warn"}" title="${esc((r.filter_reasons || []).join("; ") || "Indian-market filter flag")}" style="font-size:11px">${esc(f)}</span>`).join("")}
+          ${foreign() ? `<span class="pill" style="font-size:12px">${esc((r && r.market_name) || "")} · view only</span>` : `<span class="seg sp-exch" role="group" aria-label="Exchange">${exch}</span>`}
+          ${r && r.band ? `<span class="pill ${r.band_skip ? "bad" : ""}" title="${esc(r.band_note || "NSE daily price band")}" style="font-size:12px">Band ${esc(bandText(r.band))}</span>` : ""}
+          ${(r && r.filter_flags || []).map(f => `<span class="pill ${r.filter_block ? "bad" : "warn"}" title="${esc((r.filter_reasons || []).join("; ") || "Indian-market filter flag")}" style="font-size:12px">${esc(f)}</span>`).join("")}
           ${r && r.momentum ? `<span class="pill ${r.momentum.verdict === "strong" ? "ok" : r.momentum.verdict === "weak" ? "bad" : ""}">${esc(r.momentum.verdict || "n/a")} momentum</span>` : ""}</div>
         <div class="sp-price row" style="gap:10px;align-items:baseline"><span class="sp-px">${rupees(last)}</span>
           <span class="sp-chg ${cls}">${chg != null ? `${signedRupees(chg)} (${signedPercent(chgPct)})` : (st.stock || st.stockError ? "" : "…")}</span>
