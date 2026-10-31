@@ -1835,8 +1835,8 @@ svg.lk-mini.down .lk-fill { fill: color-mix(in srgb, var(--color-loss) 14%, tran
   #mp-card #mp-rows tr:not(.open) .stock-cell > div:not(.sym-line):not(.l2):not(.hname):not(.hold-line) { display: none !important; }
   #mp-card #mp-rows tr.open .row-more { display: block; margin-top: 4px; }
   #mp-card #mp-rows tr.open .row-more .small { min-height: 44px; }
-  #mp-card #mp-rows td.num:nth-child(8)::after { content: "BE"; font-size: 12px; color: var(--color-muted); margin-left: 4px; }
-  #mp-card #mp-rows tr.open td.num:nth-child(8)::after { content: "B4"; }
+  #mp-card #mp-rows td.num:nth-child(6)::after { content: "\25BE"; font-size: 12px; color: var(--color-muted); margin-left: 6px; }
+  #mp-card #mp-rows tr.open td.num:nth-child(6)::after { content: "\25B4"; }
 }
 
 /* Calmer colour: red and green mean profit and loss; status pills stay neutral and carry their state in a small dot plus the word */
@@ -1848,3 +1848,27 @@ body .pill.bad { background: transparent; color: var(--color-text); border-color
 body .pill.bad:not(:has(.dot))::before { content: ""; width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--color-loss); }
 
 html[data-text="large"] { zoom: 1.15; }
+
+/* Holdings on a phone, redesigned: the value is the headline (what it is worth now), profit / loss sits under it in colour, the sparkline
+   between; the name and "qty x buy price" on the left; today's move bottom right. Price per share and the stop open with a tap. */
+@media (max-width: 700px) {
+  body #mp-card #mp-rows tr[data-open-stock] { grid-template-columns: minmax(0, 1fr) 72px auto; grid-template-rows: auto auto auto; gap: 3px 12px; padding: 14px 16px; align-items: center; }
+  body #mp-card #mp-rows .stock-cell > .sym-line { grid-column: 1; grid-row: 1; }
+  body #mp-card #mp-rows .stock-cell > .sym-line a.sym { font-size: 16px; font-weight: 700; }
+  body #mp-card #mp-rows .stock-cell > .hname { grid-column: 1 / 3; grid-row: 2; padding-right: 8px; font-size: 13px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  body #mp-card #mp-rows .stock-cell > .hold-line { grid-column: 1 / 3; grid-row: 3; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  body #mp-card #mp-rows td.spark-col { grid-column: 2; grid-row: 1; justify-self: end; align-self: center; width: 72px; height: 26px; }
+  body #mp-card #mp-rows td.spark-col svg { width: 72px; height: 26px; display: block; }   /* 72 px: an earlier container rule hides the line under 70 px */
+  body #mp-card #mp-rows .hold-inv { display: none; }
+  body #mp-card #mp-rows tr.open .hold-inv { display: inline; }
+  body #mp-card #mp-rows td.num:nth-child(7) { grid-column: 3; grid-row: 1; justify-self: end; font-size: 17px; font-weight: 700; }
+  body #mp-card #mp-rows td.num:nth-child(7)::before { display: none; }
+  body #mp-card #mp-rows td.num:nth-child(8) { grid-column: 3; grid-row: 2; justify-self: end; display: flex; flex-direction: row; gap: 6px; align-items: baseline; font-size: 14px; font-weight: 600; }
+  body #mp-card #mp-rows td.num:nth-child(8) .l2 { font-size: 13px; font-weight: 500; background: transparent; padding: 0; border-radius: 0; }
+  body #mp-card #mp-rows td.num:nth-child(6) { grid-column: 3; grid-row: 3; justify-self: end; font-size: 12px; }
+  body #mp-card #mp-rows td.num:nth-child(5) { display: none; }
+  body #mp-card #mp-rows tr.open td.num:nth-child(5) { display: block; grid-column: 1 / -1; grid-row: 4; justify-self: start; font-size: 13px; font-family: inherit; font-weight: 400; color: var(--color-muted); }
+  body #mp-card #mp-rows tr.open td.num:nth-child(5)::before { content: "Price per share "; position: static; width: auto; height: auto; margin: 0; clip: auto; overflow: visible; font-size: 13px; color: var(--color-muted); }
+  body #mp-card #mp-rows tr.open td.prot-cell { grid-row: 5; }
+  body #mp-card #mp-rows tr.open .row-more { grid-column: 1 / -1; grid-row: 6; }
+}
