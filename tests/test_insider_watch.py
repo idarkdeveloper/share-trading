@@ -163,3 +163,19 @@ def test_alert_skips_esop_trust_and_off_market_trades_and_adds_up_one_person(tmp
     subject, body = iw.alert_text(fresh)
     assert body.count("A Director") == 1 and "sold 150 shares, ₹4.5 lakh" in body and "2 filings" in body
     assert "Welfare Trust" not in body
+
+
+def test_insider_alert_is_an_email_card_like_the_news_one():
+    from trading_agent.alert_cards import insider_card
+    rows = [{"symbol": "JSW", "person": "A <b>Director</b>", "side": "sell", "mode": "Market Sale", "category": "Director",
+             "qty": 100, "value": 3e5, "date": "2026-10-27"},
+            {"symbol": "JSW", "person": "A <b>Director</b>", "side": "sell", "mode": "Market Sale", "category": "Director",
+             "qty": 50, "value": 1.5e5, "date": "2026-10-28"},
+            {"symbol": "ALPHA", "person": "P Promoter", "side": "buy", "mode": "Market Purchase", "category": "Promoters",
+             "qty": 7000, "value": 1.4e7, "date": "2026-10-19"}]
+    html = insider_card(rows)
+    assert "INSIDER TRADES" in html and "2 insider trades in your stocks" not in html and "3 insider trades" in html
+    assert "A &lt;b&gt;Director&lt;/b&gt;" in html and "<b>Director</b>" not in html.replace("<b>A &lt;b&gt;Director&lt;/b&gt;</b>", "")   # escaped
+    assert "sold</b> 150 shares" in html and "₹4.5 lakh" in html and "2 filings" in html and "bought</b> 7,000 shares" in html
+    assert "Not advice" in html
+

@@ -297,3 +297,37 @@ def announcements_card(rows: list[dict[str, Any]]) -> str:
         f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0">{"".join(items)}</table>'
         f'<div style="font-size:11px;color:{MUTED};margin-top:4px;">{legend} (by the kind of filing)</div>'
         "</td></tr></table>")
+
+
+def insider_card(rows: list[dict[str, Any]]) -> str:
+    """Insider trades in your stocks as a timeline like the announcements card: a coloured tag per company, who traded and how
+    much, a green dot for a buy and a red one for a sale (insider_watch.grouped adds one person's filings up)."""
+    from .insider_watch import NOTE, grouped, money_text
+    items = []
+    for g in grouped(rows):
+        sym = str(g["symbol"])
+        c = _tag_colour(sym)
+        buy = g["side"] == "buy"
+        qty = f"{g['qty']:,.0f} shares" if g["qty"] else "shares"
+        extra = " · ".join(x for x in (money_text(g["value"] or None), str(g.get("mode") or ""), f"{g['n']} filings" if g["n"] > 1 else "") if x)
+        items.append(
+            '<tr><td valign="top" style="width:18px;padding-top:4px;">'
+            f'<div style="width:10px;height:10px;border-radius:5px;background:{GREEN if buy else RED};"></div></td>'
+            f'<td style="padding:0 0 14px 6px;border-left:1px solid {BORDER};">'
+            f'<span style="display:inline-block;font-size:12px;font-weight:700;color:{c};border:1px solid {c};'
+            f'border-radius:4px;padding:1px 6px;">{_e(sym)}</span>'
+            f'<span style="font-size:12px;color:{MUTED};"> · {_e(g["when"])}</span>'
+            f'<div style="font-size:14px;color:{TEXT};line-height:1.45;margin-top:4px;">'
+            f'<b>{_e(g["person"])}</b> ({_e(g["who"])}) <b style="color:{GREEN if buy else RED};">{"bought" if buy else "sold"}</b> {_e(qty)}</div>'
+            f'<div style="font-size:13px;color:{MUTED};line-height:1.45;margin-top:2px;">{_e(extra)}</div></td></tr>')
+    n = len(rows)
+    return (
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{BG};'
+        f'border:1px solid {BORDER};border-radius:10px;font-family:{FONT};"><tr><td style="padding:16px;">'
+        f'<div style="font-size:12px;font-weight:700;letter-spacing:0.8px;color:{MUTED};">TRADING AGENT · INSIDER TRADES</div>'
+        f'<div style="font-size:17px;font-weight:700;color:{FG};margin:8px 0 12px 0;">🧑‍💼 {n} insider trade{"s" if n != 1 else ""} in your stocks</div>'
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0">{"".join(items)}</table>'
+        f'<div style="font-size:12px;color:{MUTED};margin-top:4px;"><span style="color:{GREEN};">●</span> bought · '
+        f'<span style="color:{RED};">●</span> sold</div>'
+        f'<div style="font-size:12px;color:{MUTED};margin-top:10px;line-height:1.5;">{_e(NOTE)}</div>'
+        "</td></tr></table>")

@@ -243,33 +243,48 @@ def book_for(settings: Any) -> InsiderBook:
     return InsiderBook(settings.state_dir, getattr(settings, "insider_min_buy", MIN_BUY_DEFAULT) or MIN_BUY_DEFAULT)
 
 
-def alert_text(rows: list[dict[str, Any]]) -> tuple[str, str]:
-    """(subject, body) for an alert about insider trades in your stocks."""
-    def money(v: Any) -> str:
-        if not v:
-            return "value not stated"
-        return f"₹{v / 1e7:,.2f} cr" if v >= 1e7 else f"₹{v / 1e5:,.1f} lakh" if v >= 1e5 else f"₹{v:,.0f}"
-    syms = sorted({r["symbol"] for r in rows})
-    subject = f"[INSIDER] {len(rows)} insider trade(s) in {', '.join(syms[:4])}{'…' if len(syms) > 4 else ''}"
-    groups: dict[tuple[Any, ...], dict[str, Any]] = {}   # one line per person, side and mode, quantities and values added up
+def money_text(v: Any) -> str:
+    if not v:
+        return "value not stated"
+    return f"₹{v / 1e7:,.2f} cr" if v >= 1e7 else f"₹{v / 1e5:,.1f} lakh" if v >= 1e5 else f"₹{v:,.0f}"
+
+
+def grouped(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One entry per stock, person, side and mode, with quantities and values added up and the date range:
+    {symbol, company, person, who, side, mode, qty, value, when, n}."""
+    groups: dict[tuple[Any, ...], dict[str, Any]] = {}
     for r in rows:
-        g = groups.setdefault((r["symbol"], r["person"], r["side"], r.get("mode")), {"r": r, "qty": 0.0, "value": 0.0, "dates": [], "n": 0})
+        g = groups.setdefault((r["symbol"], r["person"], r["side"], r.get("mode")), {
+            "symbol": r["symbol"], "company": r.get("company"), "person": r["person"], "who": who(r), "side": r["side"],
+            "mode": r.get("mode"), "qty": 0.0, "value": 0.0, "dates": [], "n": 0})
         g["qty"] += r.get("qty") or 0.0
         g["value"] += r.get("value") or 0.0
         g["n"] += 1
         if r.get("date"):
             g["dates"].append(r["date"])
-    lines = []
+    out = []
     for g in groups.values():
-        r = g["r"]
+        d = sorted(g.pop("dates"))
+        g["when"] = "date not stated" if not d else d[0] if d[0] == d[-1] else f"{d[0]} to {d[-1]}"
+        out.append(g)
+    return out
+
+
+NOTE = ("From NSE insider-trading (PIT) filings. A promoter buying in the market is usually read as a good "
+        "sign and a sale as a mild one; a sale can also be for tax or personal reasons. Not advice.")
+
+
+def alert_text(rows: list[dict[str, Any]]) -> tuple[str, str]:
+    """(subject, body) for an alert about insider trades in your stocks."""
+    syms = sorted({r["symbol"] for r in rows})
+    subject = f"[INSIDER] {len(rows)} insider trade(s) in {', '.join(syms[:4])}{'…' if len(syms) > 4 else ''}"
+    lines = []
+    for g in grouped(rows):
         qty = f"{g['qty']:,.0f} shares" if g["qty"] else "shares"
-        how = f", {r['mode']}" if r.get("mode") else ""
-        d = sorted(g["dates"])
-        when = "date not stated" if not d else d[0] if d[0] == d[-1] else f"{d[0]} to {d[-1]}"
+        how = f", {g['mode']}" if g.get("mode") else ""
         many = f" ({g['n']} filings)" if g["n"] > 1 else ""
-        lines.append(f"{r['symbol']}: {r['person']} ({who(r)}) {'bought' if r['side'] == 'buy' else 'sold'} {qty}, "
-                     f"{money(g['value'] or None)}{how}, on {when}{many}")
+        lines.append(f"{g['symbol']}: {g['person']} ({g['who']}) {'bought' if g['side'] == 'buy' else 'sold'} {qty}, "
+                     f"{money_text(g['value'] or None)}{how}, on {g['when']}{many}")
     lines.append("")
-    lines.append("From NSE insider-trading (PIT) filings. A promoter buying in the market is usually read as a good "
-                 "sign and a sale as a mild one; a sale can also be for tax or personal reasons. Not advice.")
-    return subject, "\n".join(lines)
+    lines.append(NOTE)
+    return subject, chr(10).join(lines)
