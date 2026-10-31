@@ -142,3 +142,24 @@ def test_the_pages_show_it():
     assert "${insiderChip(h.symbol)}" in index and "function renderInsider" in index
     assert 'sec("insider", "Insider trades", insiderHtml(), dflt, insiderHint())' in js
     assert 'api("/api/insider?symbol=" + encodeURIComponent(st.ticker))' in js
+
+
+def test_alert_skips_esop_trust_and_off_market_trades_and_adds_up_one_person(tmp_path):
+    """The JSWSTEEL email listed five ESOP-trust transfers (off market, at face value). Only a promoter, director or key
+    manager trading on the market is mailed, and several filings by one person become one line."""
+    book = iw.InsiderBook(tmp_path)
+    c = Client()
+    book.refresh(c, NOW)
+    book.new_for(["JSW"])                                                        # first call marks the old book
+    c.rows = ROWS + [
+        pit("JSW", "JSW Steel Employees Welfare Trust", side="Sale", qty=766, value=766, cat="Other", mode="Off Market", day="2026-10-26"),
+        pit("JSW", "JSW Steel Employees Welfare Trust", side="Sale", qty=121, value=1.5e5, cat="Other", mode="Market Sale", day="2026-10-28"),
+        pit("JSW", "A Director", side="Sale", qty=100, value=3e5, cat="Director", mode="Market Sale", day="2026-10-27"),
+        pit("JSW", "A Director", side="Sale", qty=50, value=1.5e5, cat="Director", mode="Market Sale", day="2026-10-28")]
+    book.refresh(c, NOW + timedelta(minutes=15))
+    fresh = book.new_for(["JSW"])
+    assert [r["person"] for r in fresh] == ["A Director", "A Director"]
+    assert book.new_for(["JSW"]) == []                                           # the skipped ones are marked seen, not mailed later
+    subject, body = iw.alert_text(fresh)
+    assert body.count("A Director") == 1 and "sold 150 shares, ₹4.5 lakh" in body and "2 filings" in body
+    assert "Welfare Trust" not in body

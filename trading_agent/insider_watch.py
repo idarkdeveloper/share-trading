@@ -81,6 +81,12 @@ def is_pledge(r: dict[str, Any]) -> bool:
     return bool(_PLEDGE.search(f"{r.get('mode') or ''} {r.get('instrument') or ''}"))
 
 
+def is_alertable(r: dict[str, Any]) -> bool:
+    """Worth an email: a promoter, director or key manager trading on the market (the rule the notable-buys view uses).
+    ESOP trusts, gifts, inter-se and off-market transfers, and 'Other' categories are left out of the alert."""
+    return is_insider(r) and is_market(r) and is_equity(r)
+
+
 def is_market(r: dict[str, Any]) -> bool:
     mode = str(r.get("mode") or "")
     return bool(_MARKET.search(mode)) and not _OFF_MARKET.search(mode)
@@ -216,7 +222,7 @@ class InsiderBook:
                 continue
             if first or r.get("symbol") in want:
                 seen.add(k)
-                if not first:
+                if not first and is_alertable(r):   # off-market, ESOP-trust and non-insider trades are marked seen, not mailed
                     fresh.append(r)
         d["seen"] = sorted(seen)[-SEEN_KEEP:]
         self._save(d)
@@ -245,12 +251,24 @@ def alert_text(rows: list[dict[str, Any]]) -> tuple[str, str]:
         return f"₹{v / 1e7:,.2f} cr" if v >= 1e7 else f"₹{v / 1e5:,.1f} lakh" if v >= 1e5 else f"₹{v:,.0f}"
     syms = sorted({r["symbol"] for r in rows})
     subject = f"[INSIDER] {len(rows)} insider trade(s) in {', '.join(syms[:4])}{'…' if len(syms) > 4 else ''}"
-    lines = []
+    groups: dict[tuple[Any, ...], dict[str, Any]] = {}   # one line per person, side and mode, quantities and values added up
     for r in rows:
-        qty = f"{r['qty']:,.0f} shares" if r.get("qty") else "shares"
+        g = groups.setdefault((r["symbol"], r["person"], r["side"], r.get("mode")), {"r": r, "qty": 0.0, "value": 0.0, "dates": [], "n": 0})
+        g["qty"] += r.get("qty") or 0.0
+        g["value"] += r.get("value") or 0.0
+        g["n"] += 1
+        if r.get("date"):
+            g["dates"].append(r["date"])
+    lines = []
+    for g in groups.values():
+        r = g["r"]
+        qty = f"{g['qty']:,.0f} shares" if g["qty"] else "shares"
         how = f", {r['mode']}" if r.get("mode") else ""
+        d = sorted(g["dates"])
+        when = "date not stated" if not d else d[0] if d[0] == d[-1] else f"{d[0]} to {d[-1]}"
+        many = f" ({g['n']} filings)" if g["n"] > 1 else ""
         lines.append(f"{r['symbol']}: {r['person']} ({who(r)}) {'bought' if r['side'] == 'buy' else 'sold'} {qty}, "
-                     f"{money(r.get('value'))}{how}, on {r.get('date') or 'date not stated'}")
+                     f"{money(g['value'] or None)}{how}, on {when}{many}")
     lines.append("")
     lines.append("From NSE insider-trading (PIT) filings. A promoter buying in the market is usually read as a good "
                  "sign and a sale as a mild one; a sale can also be for tax or personal reasons. Not advice.")
