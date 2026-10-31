@@ -1692,6 +1692,39 @@ def test_paper_accounts_tab_lists_all_six_and_the_forward_card_reads_its_own_fil
     assert not acc["cluster"]["started"] and "3 or more insiders" in acc["cluster"]["about"]
 
 
+def test_paper_accounts_carry_the_nifty_50_and_cash_lines_from_stored_prices(server):
+    """The tab makes no network call: the after-close run stores the NIFTYBEES closes, the API turns them into a
+    return, a gap and a worst fall over each account's own days, and cash accrues at CASH_RATE_PCT."""
+    from datetime import datetime
+    from trading_agent import paper_refs
+    from trading_agent.forward import IST, ForwardTest
+    base, app = server
+    prices = {"MID150BEES": 200.0, "A": 100.0, "B": 50.0}
+    for day in (19, 22):
+        ForwardTest(app.settings.state_dir, top=2, capital=100_000, price_fn=lambda s: prices[s],
+                    now=lambda d=day: datetime(2026, 10, d, 16, 0, tzinfo=IST)).run(
+            lambda: {"top": [{"symbol": "A"}, {"symbol": "B"}], "eligible": 9})
+    _, pa = _get(base + "/api/paper-accounts")
+    fwd = next(a for a in pa["accounts"] if a["key"] == "forward")
+    assert [r["key"] for r in fwd["refs"]] == ["cash"]                       # nothing stored yet: cash only
+    paper_refs.path_for(app.settings.state_dir).write_text(
+        json.dumps({"NIFTYBEES": {"2026-10-19": 100.0, "2026-10-20": 96.0, "2026-10-22": 102.0}}), encoding="utf-8")
+    _, pa = _get(base + "/api/paper-accounts")
+    fwd = next(a for a in pa["accounts"] if a["key"] == "forward")
+    refs = {r["key"]: r for r in fwd["refs"]}
+    assert refs["nifty50"]["return"] == pytest.approx(0.02) and refs["nifty50"]["max_drawdown"] == pytest.approx(-0.04)
+    assert refs["nifty50"]["gap"] == pytest.approx(fwd["strategy_return"] - 0.02)
+    assert refs["cash"]["return"] == pytest.approx(1.06 ** (3 / 365) - 1) and refs["cash"]["max_drawdown"] == 0.0
+    assert all("refs" not in a for a in pa["accounts"] if not a["started"])  # an account not started has none
+
+
+def test_the_paper_cards_show_the_nifty_50_and_cash_comparisons():
+    html = (Path(__file__).resolve().parent.parent / "trading_agent" / "ui" / "index.html").read_text(encoding="utf-8")
+    body = html[html.index("function renderPaper("):html.index('$("pa-refresh")')]
+    assert "const refLine = a =>" in body and '"Nifty 50"' in body and '"cash"' in body and "${refLine(a)}" in body
+    assert "a.refs" in body and "extra context over the same days, not a pass or fail" in body
+
+
 def test_order_forms_show_a_live_price_line_from_the_read_only_lookup():
     ui = Path(__file__).resolve().parent.parent / "trading_agent" / "ui"
     index, replay_js = (ui / "index.html").read_text(encoding="utf-8"), (ui / "replay.js").read_text(encoding="utf-8")
