@@ -1846,3 +1846,5 @@ body .pill.ok:not(:has(.dot))::before { background: var(--color-profit); }
 body .pill.warn:not(:has(.dot))::before { background: var(--color-replay); }
 body .pill.bad { background: transparent; color: var(--color-text); border-color: var(--color-loss); }
 body .pill.bad:not(:has(.dot))::before { content: ""; width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--color-loss); }
+
+html[data-text="large"] { zoom: 1.15; }

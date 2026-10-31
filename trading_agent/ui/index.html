@@ -355,6 +355,7 @@
     <section class="set-sec" id="set-appearance" aria-labelledby="set-appearance-t"><h3 id="set-appearance-t">Appearance</h3><p class="sub">Saved in this browser only.</p>
       <div class="menu-row theme-switch" role="group" aria-labelledby="theme-label"><span class="theme-label" id="theme-label">Theme</span><div class="seg"><button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button><button type="button" data-theme-choice="light" aria-pressed="false">Light</button><button type="button" data-theme-choice="auto" aria-pressed="true">Auto</button></div></div>
       <div class="menu-row" role="group" aria-labelledby="density-label"><span class="theme-label" id="density-label">Table rows</span><div class="seg"><button type="button" data-density="comfortable" aria-pressed="true">Comfortable</button><button type="button" data-density="compact" aria-pressed="false">Compact</button></div></div>
+      <div class="menu-row" role="group" aria-labelledby="text-label"><span class="theme-label" id="text-label">Text size</span><div class="seg"><button type="button" data-text="normal" aria-pressed="true">Normal</button><button type="button" data-text="large" aria-pressed="false">Large</button></div></div>
       <div class="menu-row" role="group" aria-labelledby="layout-label"><span class="theme-label" id="layout-label">Layout</span><div class="seg"><button type="button" data-layout="tabs" aria-pressed="true">Tabs</button><button type="button" data-layout="sections" aria-pressed="false">One page</button></div></div>
     </section>
     <div id="set-live">
@@ -645,6 +646,10 @@
     ev.preventDefault(); goWorkspace(n); const b = $("wst-" + n); if(b && b.focus) b.focus();
   });
   function setLayout(v){ layout = v === "sections" ? "sections" : "tabs"; store.set("liveLayout", layout); paintWorkspaces(); setTimeout(redrawCharts, 0); }
+  // Text size: "large" zooms the whole page about 15% (CSS zoom; kept in this browser). shortcut: a zoom, not a rem-based type scale.
+  function setText(v, save){ const big = v === "large"; document.documentElement.dataset.text = big ? "large" : "normal"; if(save) store.set("liveText", big ? "large" : "normal");   // saved only when chosen
+    document.querySelectorAll("[data-text]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.text === (big ? "large" : "normal")))); }
+  setText(store.get("liveText"), false);
   function setDensity(v){ density = v === "compact" ? "compact" : "comfortable"; store.set("liveDensity", density); paintWorkspaces(); }
 
   // ---- stop protection per real holding, and the freshness chip ----
@@ -2130,6 +2135,7 @@
     if(b.dataset.sinceGo){ goWorkspace(b.dataset.sinceGo, true); return; }
     if(b.dataset.openFull){ lookup(b.dataset.openFull); return; }
     if(b.dataset.sizeIt){ $("sz-ticker").value = b.dataset.sizeIt; goWorkspace("size"); palCentre($("sz-form")); if($("sz-form").requestSubmit) $("sz-form").requestSubmit(); return; }
+    if(b.dataset.text){ setText(b.dataset.text, true); return; }
     if(b.dataset.density){ setDensity(b.dataset.density); return; }
     if(b.dataset.layout){ setLayout(b.dataset.layout); return; }
     if(b.dataset.dfilRemove !== undefined){ dfil = dfil.filter((_, j) => j !== Number(b.dataset.dfilRemove)); render(true); $("deal-add").focus(); return; }
