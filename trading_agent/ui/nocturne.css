@@ -1824,3 +1824,5 @@ svg.lk-mini.down .lk-fill { fill: color-mix(in srgb, var(--color-loss) 14%, tran
 .needs-clear { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--color-muted); }
 .needs-clear i { width: 8px; height: 8px; border-radius: 50%; background: var(--color-profit); }
 @media (max-width: 700px) { .needs { padding: 10px 14px; margin-bottom: 10px; } .needs-chip { min-height: 44px; } }
+
+.eq-line { flex: 0 0 100%; margin: 6px 0 0; font-size: 14px; line-height: 1.5; color: var(--color-muted); }

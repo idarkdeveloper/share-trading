@@ -765,6 +765,7 @@
     const label = {risk_on: "Risk-on", risk_off: "Risk-off", neutral: "Neutral"}[r.regime] || esc(r.regime);
     el.innerHTML = `<span class="regime-chip ${cls}"><span class="dot" aria-hidden="true"></span>${label} · score ${r.score>=0?"+":""}${r.score}</span>
       <span class="sig"><span class="sig-why">${esc((r.signals||[]).join(" · "))}</span>${r.guidance ? `<span class="sig-sep"> — </span><span class="sig-guide">${esc(r.guidance)}</span>` : ""}</span>`;
+    paintHero();   // the headline sentence quotes this
     const m = r.markets || {};
     const fmt = (k, v) => k === "india_vix" ? v.toFixed(1) : k === "usdinr" ? v.toFixed(2) : Math.round(v).toLocaleString("en-IN");
     mk.innerHTML = ["nifty50","sp500","nasdaq_fut","nikkei","india_vix","usdinr","brent"]
@@ -1490,7 +1491,13 @@
     const delta = (v, p, label) => `<span class="eq-delta ${toneOf(v)}">${esc(sinr(v))} (${p >= 0 ? "+" : "−"}${Math.abs(p).toFixed(2)}%) · ${label}</span>`;
     $("mp-eq-head").innerHTML = `<span class="eq-k">${prac ? "PRACTICE ACCOUNT · PRACTICE MONEY" : "HOLDINGS VALUE · GROWW"}</span><b class="eq-big">${esc(inr(total))}</b>`
       + (pl != null ? delta(pl, plPct, prac ? "since start" : "vs what you paid") : "")
-      + (chg != null ? delta(chg, chgPct, back.length > 1 ? "1M" : "since " + esc(series[0][0])).replace('class="eq-delta ', 'class="eq-delta eq-small ') : "");
+      + (chg != null ? delta(chg, chgPct, back.length > 1 ? "1M" : "since " + esc(series[0][0])).replace('class="eq-delta ', 'class="eq-delta eq-small ') : "")
+      + (() => {   // one plain sentence: where you stand, then what the market says to do about it
+          const rg = S && S.regime && !S.regime.error ? S.regime : null, up = pl != null && pl >= 0;
+          const a = pl == null ? "" : `${up ? "Up" : "Down"} ${inr(Math.abs(pl))} (${Math.abs(plPct).toFixed(1)}%) ${prac ? "since you started" : "against what you paid"}. `;
+          const b = rg ? `The market is ${({risk_on: "risk-on", risk_off: "risk-off", neutral: "neutral"})[rg.regime] || rg.regime}${rg.guidance ? ": " + String(rg.guidance).replace(/\.$/, "") : ""}.` : "";
+          return a || b ? `<p class="eq-line">${esc(a + b)}</p>` : "";
+        })();
     if(back.length < 2 && real.length < 2){ box.innerHTML = '<div class="sub">The chart appears once prices for your holdings have loaded.</div>'; note.textContent = ""; return; }
     const inv = m.invested > 0 ? m.invested : null;
     if(!TA.valueChart(box, {back, real, inv, up: pl != null ? pl >= 0 : !(chg != null && chg < 0)})){ box.innerHTML = '<div class="sub">The chart library did not load.</div>'; note.textContent = ""; return; }
