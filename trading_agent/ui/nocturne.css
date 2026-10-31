@@ -1838,3 +1838,11 @@ svg.lk-mini.down .lk-fill { fill: color-mix(in srgb, var(--color-loss) 14%, tran
   #mp-card #mp-rows td.num:nth-child(8)::after { content: "BE"; font-size: 12px; color: var(--color-muted); margin-left: 4px; }
   #mp-card #mp-rows tr.open td.num:nth-child(8)::after { content: "B4"; }
 }
+
+/* Calmer colour: red and green mean profit and loss; status pills stay neutral and carry their state in a small dot plus the word */
+body .pill.ok, body .pill.warn { background: transparent; color: var(--color-text); border-color: var(--color-divider); }
+body .pill.ok:not(:has(.dot))::before, body .pill.warn:not(:has(.dot))::before { content: ""; width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--color-neutral-500); }
+body .pill.ok:not(:has(.dot))::before { background: var(--color-profit); }
+body .pill.warn:not(:has(.dot))::before { background: var(--color-replay); }
+body .pill.bad { background: transparent; color: var(--color-text); border-color: var(--color-loss); }
+body .pill.bad:not(:has(.dot))::before { content: ""; width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--color-loss); }
