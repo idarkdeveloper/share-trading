@@ -694,6 +694,15 @@ run by the watch service in the same after-close job; nothing in them is retuned
   (default 22 Oct 2026; `off` disables it), files `state/forward/cluster_<universe>.json`; the plan is
   `docs/research/cluster-buying-paper-account-2026-10-21.md`. `cluster-paper --run` does today's run by hand.
 
+**Reference lines (display only).** Each account is judged against its own universe's index fund (MID150BEES for the
+Midcap 150, HDFCSML250 for the Smallcap 250). The Paper accounts tab also shows, under each card, the account against
+the **Nifty 50 fund (NIFTYBEES)** (dividends reinvested, before charges) and against **cash**, over the account's own days.
+They are context: no pass or fail rule, order or account reads them. Yahoo has no market price for cash (Liquid BeES
+pays its return as extra units and its price stays at 1,000), so cash accrues at `CASH_RATE_PCT` a year (default 6.0, an
+assumption: set it to what a liquid fund yields) in calendar days. The tab makes no network call, so the server's
+after-close run stores the NIFTYBEES closes in `state/paper_references.json` (the last year each time, so a new
+account is backfilled at once); `paper-refs` stores them now. Until they are stored the card says so and shows cash only.
+
 **US, Japan and UK replication (once per market).** `research-replication --market us|jp|uk --confirm` runs the adopted rules,
 unchanged except that no tax is charged, on the S&P MidCap 400 (against IJH) or the TOPIX Mid400 (against the TOPIX ETF
 1306.T, as JPX lists no Mid400 ETF), 1 Oct 2016 – 30 Sep 2026, at 5 or 10 bps a side, as

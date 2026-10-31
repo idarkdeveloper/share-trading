@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .paper_refs import parse_cash_rate_pct
+
 
 def _load_dotenv(path: Path) -> None:
     """Minimal .env loader (no extra dependency). Existing env vars win."""
@@ -362,6 +364,7 @@ class Settings:
     top10_paper_start: str | None = TOP10_PAPER_DEFAULT  # variant B's (top 10) paper account from this date
     brake_paper_start: str | None = BRAKE_PAPER_DEFAULT  # the drawdown brake's paper account from this date
     cluster_paper_start: str | None = CLUSTER_PAPER_DEFAULT  # the cluster-buying paper account from this date
+    cash_rate_pct: float = 6.0  # the cash line on the Paper accounts tab: an assumed yearly rate (display only)
     resmom_paper_start: str | None = RESMOM_PAPER_DEFAULT  # residual momentum's (variant E's) paper account from this date
     # Read-only check of the real services (integration.py), run by the watch service at 08:35 IST on trading days.
     integration_check: bool = True
@@ -603,6 +606,7 @@ def load_settings(dotenv: Path | None = Path(".env")) -> Settings:
         top10_paper_start=top10_paper_start,
         brake_paper_start=brake_paper_start,
         cluster_paper_start=cluster_paper_start,
+        cash_rate_pct=parse_cash_rate_pct(env("CASH_RATE_PCT")),
         forward_universe=(env("FORWARD_UNIVERSE") or "NIFTYMIDCAP150").strip().upper().replace(" ", ""),
         integration_check=_bool(env("INTEGRATION_CHECK"), True),
         integration_claude=_bool(env("INTEGRATION_CLAUDE"), False),

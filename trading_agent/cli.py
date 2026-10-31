@@ -1655,6 +1655,15 @@ def cmd_top10_paper(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_paper_refs(args: argparse.Namespace) -> int:
+    """Store the Nifty 50 fund's closes for the Paper accounts tab now (the watch service does it after each close)."""
+    from .paper_refs import update
+    from .runner import free_prices
+    settings = _settings(args)
+    print(update(settings.state_dir, free_prices(settings)))
+    return 0
+
+
 def cmd_brake_paper(args: argparse.Namespace) -> int:
     """The drawdown brake's paper account: show it, or with --run do today's after-close run now."""
     from .brake_paper import BrakePaper, format_brake_paper, run_brake_paper_due
@@ -2247,6 +2256,8 @@ def cmd_watch(args: argparse.Namespace) -> int:
         print(run_brake_paper_due(settings, forward_prices, holidays))
         from .cluster_paper import run_cluster_paper_due   # cluster buying's own paper account (never raises)
         print(run_cluster_paper_due(settings, forward_prices, holidays))
+        from .paper_refs import update as update_paper_refs   # the Nifty 50 line beside every account (never raises)
+        print(update_paper_refs(settings.state_dir, forward_prices))
     forward = ForwardScheduler(settings.state_dir, after_close, holidays=holidays)
     w = Watcher(settings, every=args.every, news=news, digest=digest, forward=forward,
                 integration=make_integration_scheduler(settings, notifier, holidays),
@@ -2563,6 +2574,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("top10-paper", help="variant B's (top 10) paper account (practice money only)")
     sp.add_argument("--run", action="store_true", help="do today's after-close run now (start, monthly rebalance, mark)")
     sp.set_defaults(func=cmd_top10_paper)
+    sub.add_parser("paper-refs", help="store the Nifty 50 fund's closes for the Paper accounts tab's reference lines").set_defaults(func=cmd_paper_refs)
     sp = sub.add_parser("brake-paper", help="the drawdown brake's (100-day average) paper account (practice money only)")
     sp.add_argument("--run", action="store_true", help="do today's after-close run now (brake check, monthly rebalance, mark)")
     sp.set_defaults(func=cmd_brake_paper)

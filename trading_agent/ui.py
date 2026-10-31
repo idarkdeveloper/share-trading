@@ -2493,8 +2493,11 @@ class App:
     def paper_accounts(self) -> dict[str, Any]:
         """GET /api/paper-accounts: every paper account's standing from its stored file (no network, never an order).
         An account not started yet is listed as such."""
+        from . import paper_refs
         from .forward import ForwardTest
         uni = str(self.settings.forward_universe or "NIFTYMIDCAP150").upper()
+        refs = paper_refs.load(self.settings.state_dir)   # stored by the after-close run: no network here
+        rate = float(getattr(self.settings, "cash_rate_pct", paper_refs.DEFAULT_CASH_RATE_PCT))
         out: list[dict[str, Any]] = []
         for key, prefix, title, about in self.PAPER_ACCOUNTS:
             name = f"{prefix}{uni.lower()}"
@@ -2513,6 +2516,9 @@ class App:
                                holdings=s["holdings"][:25],
                                history=[{"date": p["date"], "equity": p["equity"], "bench": p.get("bench")}
                                         for p in hist])
+                    if hist and row["since"]:   # the Nifty 50 and cash lines, over this account's own days
+                        row["refs"] = paper_refs.lines_for(refs, rate, start=row["since"], end=hist[-1]["date"],
+                                                           strategy_return=s["strategy_return"])
                 except Exception as e:  # noqa: BLE001 - one unreadable account must not hide the others
                     row["error"] = f"{type(e).__name__}: {e}"[:200]
             out.append(row)
