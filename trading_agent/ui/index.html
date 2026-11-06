@@ -118,6 +118,22 @@
       </section>
     </div>
 
+    <section class="card an-card" id="an-card" data-anchor="analysis" aria-labelledby="an-h" hidden>
+      <div class="cardhead"><h2 id="an-h">Portfolio analysis</h2><span class="sub" id="an-sub"></span>
+        <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap"><button type="button" class="small" id="an-import" title="Import Groww's Dividend Report (PDF) and Stocks P&amp;L report (xlsx)">Import reports</button><input type="file" id="an-file" accept=".pdf,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple hidden>
+        <div class="seg an-basis" role="group" aria-label="Show each share of the portfolio by"><button type="button" class="on" data-basis="current" aria-pressed="true">Current</button><button type="button" data-basis="invested" aria-pressed="false">Invested</button></div></span></div>
+      <div class="an-grid">
+        <section class="an-block" aria-labelledby="an-asset-h"><h3 id="an-asset-h">Asset allocation</h3><div id="an-asset"></div></section>
+        <section class="an-block" aria-labelledby="an-cap-h"><h3 id="an-cap-h">Market cap</h3><div id="an-cap"></div></section>
+        <section class="an-block" aria-labelledby="an-sector-h"><h3 id="an-sector-h">Sector allocation</h3><div id="an-sector"></div></section>
+        <section class="an-block" aria-labelledby="an-news-h"><h3 id="an-news-h">News on your holdings</h3><div id="an-news"></div></section>
+        <section class="an-block" aria-labelledby="an-ret-h"><h3 id="an-ret-h">Returns (XIRR)</h3><div id="an-ret"></div></section>
+        <section class="an-block" aria-labelledby="an-div-h"><h3 id="an-div-h">Dividends</h3><div id="an-div"></div></section>
+        <section class="an-block" aria-labelledby="an-pnl-h"><h3 id="an-pnl-h">Realised profit and charges</h3><div id="an-pnl"></div></section>
+      </div>
+      <p class="sub an-foot" id="an-foot"></p>
+    </section>
+
     <div class="card" id="pp-card" hidden data-anchor="practice">
       <div class="cardhead"><h2>Practice portfolio</h2><span class="sub" id="pricesrc"></span></div>
       <div class="cardbody" style="padding-top:0;border-top:none;border-bottom:1px solid var(--line)"><div class="stats" id="pp-stats"></div></div>
@@ -1410,6 +1426,7 @@
   const isPhone = () => typeof window.matchMedia === "function" && window.matchMedia("(max-width: 700px)").matches;
   function renderMyPortfolio(m, force){
     MP = m; if(S) renderTiles();
+    if(m && m.linked && !m.error) loadAnalysis(!!force);   // the analysis card reads the same holdings from the server
     if(S && S.settings && typeof paintDeals === "function") paintDeals(investorsOf(S.settings));
     paintGrowwRefresh(m);
     const keepRows = !force && sellEdit !== null && sellEdit.source === "groww";   // a what-if panel is open: don't rebuild under it
@@ -1529,6 +1546,87 @@
     const pls = (m.holdings || []).filter(h => h.pl != null).sort((x, y) => y.pl - x.pl), mx = Math.max(1, ...pls.map(h => Math.abs(h.pl)));
     $("mp-plbars").innerHTML = pls.map(h => `<div class="plrow"><a href="#" data-lookup="${esc(h.symbol)}" class="sym">${esc(h.symbol)}</a><div class="pltrack"><span class="neg">${h.pl < 0 ? `<i style="width:${(-h.pl / mx * 100).toFixed(1)}%"></i>` : ""}</span><span class="pos">${h.pl > 0 ? `<i style="width:${(h.pl / mx * 100).toFixed(1)}%"></i>` : ""}</span></div><b class="${toneOf(h.pl)}">${sinr(h.pl)}</b></div>`).join("");
   }
+  // ---- Portfolio analysis (Live page): asset allocation, market cap and sector as lists with the current value and the amount
+  // invested, and the newest headline for up to five holdings. /api/portfolio-analysis and /api/portfolio-news read what the page
+  // already loaded; nothing here calls Groww. The toggle only changes which of the two the percentages and bars follow.
+  let AN = null, ANN = null, anAt = 0, anBusy = false, anBasis = "current";
+  try { const b = localStorage.getItem("an-basis"); if(b === "current" || b === "invested") anBasis = b; } catch(e){}
+  const anShare = r => anBasis === "invested" ? r.share_invested : r.share_current;
+  function anFold(rows){   // at most six named sectors; the rest join "Others"
+    if(rows.length <= 7) return rows;
+    const head = rows.filter(r => r.name !== "Others").slice(0, 6), rest = rows.filter(r => !head.includes(r));
+    const sum = k => rest.reduce((t, r) => t + r[k], 0);
+    return head.concat([{name: "Others", count: sum("count"), current: sum("current"), invested: sum("invested"), pl: sum("pl"), share_current: sum("share_current"), share_invested: sum("share_invested")}]);
+  }
+  function anList(id, rows, noun){
+    const el = $(id); if(!el) return;
+    const seg = rows.map((r, i) => anShare(r) > 0 ? `<span style="flex:${(anShare(r) * 100).toFixed(3)};background:var(--sec-${i % 7 + 1})"></span>` : "").join("");
+    el.innerHTML = `<div class="an-bar" role="img" aria-label="${esc(rows.map(r => r.name + " " + (anShare(r) * 100).toFixed(1) + "%").join(", "))}">${seg}</div>`
+      + `<div class="an-colhead"><span>Share of ${anBasis === "invested" ? "invested" : "current value"}</span><span>Current <span class="sub">(Invested)</span></span></div>`
+      + rows.map((r, i) => `<div class="an-row"><i class="an-dot" style="background:var(--sec-${i % 7 + 1})" aria-hidden="true"></i><div class="an-name"><b>${esc(r.name)}</b><span class="sub">${r.count} ${noun}${r.count === 1 ? "" : "s"} · ${(anShare(r) * 100).toFixed(2)}%</span></div><div class="an-amt"><b class="${toneOf(r.pl)}">${esc(inr(r.current, 2))}</b><span class="sub">${esc(inr(r.invested, 2))}</span></div></div>`).join("");
+  }
+  function renderAnalysis(){
+    const card = $("an-card"); if(!card) return;
+    const ok = MODE !== "demo" && AN && AN.available;
+    card.hidden = !ok; if(!ok) return;
+    $("an-sub").textContent = `${AN.stocks} stock${AN.stocks === 1 ? "" : "s"}${AN.holdings > AN.stocks ? ` + ${AN.holdings - AN.stocks} debt` : ""} · from your Groww holdings`;
+    anList("an-asset", AN.asset, "holding");
+    anList("an-cap", AN.cap, "stock");
+    anList("an-sector", anFold(AN.sector), "stock");
+    const notes = [];
+    if(!AN.caps_known) notes.push("The market-cap lists could not be read, so every stock shows as Other.");
+    if(!AN.sectors_known) notes.push("The sector list could not be read, so every stock shows as Others.");
+    if(AN.unpriced && AN.unpriced.length) notes.push(`Counted at what you paid (no price yet): ${AN.unpriced.join(", ")}.`);
+    notes.push("Large cap is the NIFTY 100, mid cap the NIFTY Midcap 150, small cap the NIFTY Smallcap 250; anything else is Other. Sector is NSE's industry for NIFTY 500 stocks; the rest are Others. Market cap and sector cover stocks only.");
+    $("an-foot").textContent = notes.join(" ");
+    card.querySelectorAll(".an-basis button").forEach(b => { const on = b.dataset.basis === anBasis; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); });
+  }
+  function renderAnalysisNews(){
+    const el = $("an-news"); if(!el) return;
+    const items = (ANN && ANN.items) || [];
+    el.innerHTML = items.length ? items.map(n => `<div class="an-news-row"><div class="an-news-top"><a href="#" data-lookup="${esc(n.symbol)}" class="sym">${esc(n.symbol)}</a>${n.change_pct != null ? `<b class="${toneOf(n.change_pct)}">${esc(spct(n.change_pct))}</b>` : ""}</div>${n.link ? `<a class="an-headline" href="${esc(n.link)}" target="_blank" rel="noopener noreferrer">${esc(n.title)}</a>` : `<span class="an-headline">${esc(n.title)}</span>`}<div class="sub">${esc(n.source || "")}${n.time_ist ? ` · ${esc(n.time_ist)} IST` : ""} <span class="an-tag ${esc(n.tag)}">${esc(n.tag)}</span></div></div>`).join("")
+      : `<div class="sub">${esc((ANN && (ANN.error || ANN.note)) || "No recent news on your holdings.")}</div>`;
+  }
+  // The imported Groww reports (dividends, XIRR, realised profit): GET /api/groww-reports. The import itself is further down.
+  let GR = null;
+  const anPts = v => v == null ? "" : (v >= 0 ? "ahead by " : "behind by ") + Math.abs(v * 100).toFixed(2) + " pts";
+  function renderReports(){
+    const d = GR && GR.dividends, p = GR && GR.pnl, r = GR && GR.returns;
+    const none = '<div class="sub">Import your Groww reports to see this: the Dividend Report (PDF) and the Stocks P&amp;L report (xlsx), from the Reports section of Groww.</div>';
+    const row = (a, b) => `<div class="an-brow"><span>${a}</span><span>${b}</span></div>`;
+    $("an-ret").innerHTML = r && r.available
+      ? `<div class="an-big ${toneOf(r.xirr)}">${esc(spct(r.xirr))}<span class="sub"> a year</span></div><div class="sub">${esc(shortDate(r.from))} to ${esc(shortDate(r.to))} · ${esc(inr(r.bought))} bought${r.with_dividends ? ", dividends included" : ""}, before charges</div>`
+        + (r.benchmarks || []).map(b => row(`The same money in ${esc(b.label)}`, `<b>${esc(spct(b.xirr))}</b> · <span class="${toneOf(b.gap)}">${esc(anPts(b.gap))}</span>`)).join("")
+        + ((GR.skipped || []).length ? `<div class="sub">Not shown (its price history is too short for this period): ${esc(GR.skipped.join(", "))}.</div>` : "")
+      : (p ? '<div class="sub">The XIRR could not be worked out from this report.</div>' : none);
+    const qs = d ? d.quarters.slice(-8).reverse() : [], mx = Math.max(1, ...qs.map(q => q.amount));
+    $("an-div").innerHTML = d
+      ? `<div class="an-big">${esc(inr(d.total, 2))}</div><div class="sub">${d.count} payment${d.count === 1 ? "" : "s"} from ${d.stocks} stock${d.stocks === 1 ? "" : "s"}${d.from ? ` · ex-dates ${esc(shortDate(d.from))} to ${esc(shortDate(d.to))}` : ""}</div>`
+        + qs.map(q => `<div class="an-qrow"><span class="an-qlabel">${esc(q.label)} <span class="sub">${q.year}</span></span><span class="an-qtrack"><i style="width:${(q.amount / mx * 100).toFixed(1)}%"></i></span><b>${esc(inr(q.amount, 2))}</b></div>`).join("")
+        + (d.by_stock.length ? `<div class="sub an-top">Most from: ${d.by_stock.slice(0, 3).map(s => `${esc(s.company)} ${esc(inr(s.amount))}`).join(" · ")}</div>` : "")
+      : none;
+    $("an-pnl").innerHTML = p
+      ? `<div class="an-big ${toneOf(p.realised)}">${esc(sinr(p.realised, 2))}</div><div class="sub">realised, ${esc(shortDate(p.from))} to ${esc(shortDate(p.to))}</div>`
+        + p.split.filter(x => x.lots).map(x => row(`${esc(x.name)} <span class="sub">${x.lots} lot${x.lots === 1 ? "" : "s"}</span>`, `<b class="${toneOf(x.pnl)}">${esc(sinr(x.pnl, 2))}</b>`)).join("")
+        + row("Charges paid", `<b>${esc(inr(p.charges_total, 2))}</b>`)
+        + (p.charges.length ? `<div class="sub an-top">${p.charges.slice(0, 4).map(c => `${esc(c.name)} ${esc(inr(c.amount, 2))}`).join(" · ")}</div>` : "")
+        + `<div class="sub an-top">Still held: ${p.held_lots} lot${p.held_lots === 1 ? "" : "s"}, cost ${esc(inr(p.held_cost))}, now ${esc(inr(p.held_value))} (${esc(sinr(p.unrealised, 2))}). The split is by how long each lot was held, not tax advice.</div>`
+      : none;
+  }
+  async function loadAnalysis(force){
+    if(MODE === "demo" || anBusy || (!force && Date.now() - anAt < 60000)) return;
+    anBusy = true;
+    try { AN = await api("/api/portfolio-analysis"); } catch(e){ AN = {available: false}; }
+    renderAnalysis();
+    try { ANN = await api("/api/portfolio-news"); } catch(e){ ANN = {items: [], error: e.message}; }
+    try { GR = await api("/api/groww-reports"); } catch(e){ GR = null; }
+    anBusy = false; anAt = Date.now(); renderAnalysisNews(); renderReports();
+  }
+  document.querySelectorAll("#an-card .an-basis button").forEach(b => b.addEventListener("click", () => {
+    anBasis = b.dataset.basis === "invested" ? "invested" : "current";
+    try { localStorage.setItem("an-basis", anBasis); } catch(e){}
+    renderAnalysis();
+  }));
   $("mp-refresh").addEventListener("click", () => TA.loader.busy($("mp-refresh"), () => loadMyPortfolio(true),
     {busy: "Refreshing…", done: () => MP && !MP.error ? "Updated" : null}));
   // "Refresh from Groww": one read-only Groww read now, even outside market hours; off while a refused login cools down
@@ -1547,6 +1645,23 @@
         {busy: "Reading Groww…", done: "Updated", after: () => paintGrowwRefresh(MP)});
     } catch(e){ toast(e.message); }
   });
+
+  // ---- Import Groww reports: the Dividend Report (PDF) and the Stocks P&L report (xlsx) the owner downloaded from Groww. One POST of
+  // the file (base64) to /api/groww-report, which keeps only the table rows. It is not an order and touches nothing at Groww.
+  async function anImport(files){
+    for(const f of files){
+      try {
+        if(f.size > 3 * 1024 * 1024) throw new Error(`${f.name}: too large to be one of Groww's reports`);
+        const bytes = new Uint8Array(await f.arrayBuffer());
+        let bin = ""; for(let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        const r = await api("/api/groww-report", {name: f.name, data: btoa(bin)});
+        toast(r.kind === "dividends" ? `Dividend report imported: ${r.rows} payments, ${inr(r.total, 2)}${r.check === false ? " (the rows do not add up to the report's total)" : ""}` : `P&L report imported: ${r.lots} lots`);
+      } catch(e){ toast(e.message); }
+    }
+    loadAnalysis(true);
+  }
+  $("an-import").addEventListener("click", () => $("an-file").click());
+  $("an-file").addEventListener("change", e => { const fs = [...e.target.files]; e.target.value = ""; if(fs.length) anImport(fs); });
 
   function renderFriction(f){   // the forward test's friction gate: a banner on Live and Demo, never a setting change
     const b = $("friction-banner"); if(!b) return;

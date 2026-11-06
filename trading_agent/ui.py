@@ -137,6 +137,7 @@ def _inr(v: float, d: int = 0) -> str:
 
 
 MAX_POST_BYTES = 64 * 1024   # a dashboard POST body is a few hundred bytes; anything bigger is refused (413)
+REPORT_POST_BYTES = 4 * 1024 * 1024   # except an imported Groww report (base64 of at most 3 MB)
 
 
 class BodyTooLarge(ValueError):
@@ -212,6 +213,8 @@ class App:
         self._deals_refreshing = False
         self._candle_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
         self._members_cache: tuple[float, list[dict[str, str]]] | None = None
+        self._caps_cache: tuple[float, dict[str, str]] | None = None   # {SYMBOL: large | mid | small}, 12 hours
+        self._reports_cache: tuple[Any, float, dict[str, Any]] | None = None   # the XIRR figures: (reports saved at, when, answer)
         from .fundamentals import YahooFundamentals
         from .quote import QuoteService
         self.quote_service = QuoteService(YahooFundamentals(None))  # P/E, market cap, 52-week range; 30 min per ticker
@@ -774,7 +777,8 @@ class App:
                 rows.append((at, {"symbol": sym, "name": names.get(sym, ""), "title": str(it.get("title") or "")[:200],
                                   "tag": it.get("sentiment") if it.get("sentiment") in ("positive", "negative", "neutral") else "neutral",
                                   "source": str(it.get("source") or "")[:60], "time_ist": at.strftime("%H:%M"),
-                                  "published": at.isoformat(timespec="seconds")}))
+                                  "published": at.isoformat(timespec="seconds"),
+                                  "link": str(it.get("link") or "") if str(it.get("link") or "").startswith(("https://", "http://")) else ""}))
         today = [r for r in rows if r[0].date() == now.date()]
         if not today:
             recent = [r for r in rows if 0 <= (now - r[0]).total_seconds() <= 86400]
@@ -1505,6 +1509,137 @@ class App:
         except Exception as e:  # noqa: BLE001 - the chart is a nicety
             log.warning("sector list unavailable: %s", e)
             return {"sectors": {}}
+
+    def _cap_classes(self) -> dict[str, str]:
+        """{SYMBOL: "large" | "mid" | "small"} from NSE's NIFTY 100, Midcap 150 and Smallcap 250 lists, kept 12 hours (a list that
+        cannot be read is skipped, and then nothing is kept so the next call tries again). Shared with the Demo child."""
+        if self._parent is not None:
+            return self._parent._cap_classes()
+        with self._lazy_lock:
+            hit = self._caps_cache
+            if hit is not None and time.time() - hit[0] < MEMBERS_TTL_SECONDS:
+                return hit[1]
+        from .portfolio_analysis import CAP_LISTS, build_caps
+        from .screen import load_universe
+        lists: dict[str, list[str]] = {}
+        for key, universe in CAP_LISTS:
+            try:
+                lists[key] = [m["symbol"] for m in load_universe(universe)]
+            except Exception as e:  # noqa: BLE001 - the market-cap split is a nicety
+                log.warning("market-cap list %s unavailable: %s", universe, e)
+        caps = build_caps(lists)
+        if len(lists) == len(CAP_LISTS):
+            with self._lazy_lock:
+                self._caps_cache = (time.time(), caps)
+        return caps
+
+    def portfolio_analysis(self) -> dict[str, Any]:
+        """GET /api/portfolio-analysis: your Groww holdings by asset class, market cap and sector (see portfolio_analysis.py), from
+        the holdings the page already loaded (never a Groww call). Live page only; the Demo page has no Groww portfolio."""
+        from .portfolio_analysis import analyse
+        if self.page == "demo":
+            return {"available": False, "message": "Open the Live page for your Groww portfolio."}
+        root = self._parent or self
+        m = root._my_portfolio
+        if m is None:
+            return {"available": False, "message": "Your portfolio has not loaded yet."}
+        m = root._live({**m, **root._feed_cash()})
+        if not m.get("linked", True) or m.get("error"):
+            return {"available": False, "message": "I could not read your portfolio: " + str(m.get("error") or "Groww is not linked") + "."}
+        rows = [h for h in m.get("holdings") or [] if h.get("symbol")]
+        if not rows:
+            return {"available": False, "message": "No holdings in your Groww account."}
+        try:
+            sectors = {x["symbol"].upper(): x["industry"] for x in self._index_members() if x.get("industry")}
+        except Exception as e:  # noqa: BLE001
+            log.warning("sector list unavailable: %s", e)
+            sectors = {}
+        out = analyse(rows, caps=self._cap_classes(), sectors=sectors)
+        return {**out, "available": True, "as_of": m.get("prices_as_of") or m.get("at") or m.get("saved_at")}
+
+    REPORTS_TTL_SECONDS = 900.0
+
+    def groww_reports(self) -> dict[str, Any]:
+        """GET /api/groww-reports: what the imported Groww reports say (groww_reports.py, report_analysis.py): dividends by
+        quarter, realised profit and charges, and the XIRR against index funds. The XIRR reads the funds' prices (cached by the
+        price service) and is itself kept 15 minutes; a fund whose prices do not reach back to the first buy is left out."""
+        from . import groww_reports as gr
+        from . import report_analysis as ra
+        root = self._parent or self
+        data = gr.load(root.settings.state_dir)
+        stamp = (data.get("dividends", {}).get("imported_at"), data.get("pnl", {}).get("imported_at"))
+        hit = root._reports_cache
+        if hit is not None and hit[0] == stamp and time.time() - hit[1] < self.REPORTS_TTL_SECONDS:
+            return hit[2]
+        out: dict[str, Any] = {"dividends": ra.dividends_summary(data["dividends"]) if "dividends" in data else None,
+                               "pnl": ra.pnl_summary(data["pnl"]) if "pnl" in data else None, "returns": None, "skipped": []}
+        if "pnl" in data:
+            series: dict[str, dict[str, float]] = {}
+            for sym, _label in ra.BENCHMARKS:
+                try:
+                    series[sym] = {str(b["date"]): float(b.get("adj_close") or b["close"]) for b in self.prices.history(sym, "5y") if b.get("close")}
+                except Exception as e:  # noqa: BLE001 - a benchmark is a nicety
+                    log.warning("benchmark %s unavailable for the XIRR: %s", sym, e)
+            out["returns"] = ra.returns_summary(data["pnl"], data.get("dividends"), series)
+            got = {b["symbol"] for b in (out["returns"].get("benchmarks") or [])}
+            out["skipped"] = [label for sym, label in ra.BENCHMARKS if sym not in got]
+        root._reports_cache = (stamp, time.time(), out)
+        return out
+
+    def import_groww_report(self, name: str, data_b64: str) -> dict[str, Any]:
+        """POST /api/groww-report: one Groww report (Dividend Report PDF or Stocks P&L xlsx) as base64; parsed, checked and
+        saved as rows only (groww_reports.py). Live page only."""
+        import base64
+        import binascii
+        from . import groww_reports as gr
+        self._on_live_page("Importing a Groww report")
+        root = self._parent or self
+        try:
+            raw = base64.b64decode(data_b64, validate=True)
+        except (binascii.Error, ValueError):
+            raise ValueError("the file did not arrive intact; try again") from None
+        try:
+            kind, parsed = gr.parse_report(raw)
+        except gr.ReportError as e:
+            raise ValueError(f"{name or 'This file'}: {e}") from None
+        gr.save(root.settings.state_dir, kind, parsed)
+        root._reports_cache = None
+        if kind == "dividends":
+            return {"ok": True, "kind": kind, "rows": len(parsed["rows"]), "total": parsed["total"], "check": parsed["check"]}
+        return {"ok": True, "kind": kind, "lots": len(parsed["realised"]) + len(parsed["unrealised"]),
+                "realised": parsed["realised_pnl"], "unrealised": parsed["unrealised_pnl"]}
+
+    PORTFOLIO_NEWS_ITEMS = 5
+
+    def portfolio_news(self, client: str = "") -> dict[str, Any]:
+        """GET /api/portfolio-news: the newest tagged headline for each of up to five holdings, with the stock's change today
+        (price against the close before the latest bar, as the Overview tile computes it). It is the news the alerts already use
+        (cached feeds, tagged once), so it is cheap; shares the ``/api/news/today`` rate limit."""
+        res = self.news_today("portfolio", None, client)
+        root = self._parent or self
+        prices = {str(h.get("symbol")): (h.get("price"), h.get("exchange")) for h in (root._my_portfolio or {}).get("holdings") or []}
+        seen: set[str] = set()
+        items: list[dict[str, Any]] = []
+        for it in res.get("items") or []:
+            sym = str(it.get("symbol") or "")
+            if not sym or sym in seen:
+                continue
+            seen.add(sym)
+            row = dict(it)
+            price, exch = prices.get(sym, (None, None))
+            row["change_pct"] = None
+            try:
+                bars, _err = self._ohlc(f"{sym}.BO" if exch == "BSE" else sym)
+                closes = [float(b["close"]) for b in bars or [] if isinstance(b.get("close"), (int, float))]
+                if len(closes) >= 2:
+                    last = float(price) if isinstance(price, (int, float)) else closes[-1]
+                    row["change_pct"] = last / closes[-2] - 1.0
+            except Exception:  # noqa: BLE001 - the change is a nicety
+                pass
+            items.append(row)
+            if len(items) >= self.PORTFOLIO_NEWS_ITEMS:
+                break
+        return {"items": items, "note": res.get("note"), "as_of": res.get("as_of")}
 
     def stock(self, ticker: str, exchange: str = "NSE") -> dict[str, Any]:
         """GET /api/stock: price block, fundamentals, financials, profile, shareholding, technicals and similar stocks."""
@@ -2716,11 +2851,11 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             self._json(payload, status)
             return True
 
-        def _body(self) -> dict[str, Any]:
+        def _body(self, limit: int = MAX_POST_BYTES) -> dict[str, Any]:
             n = int(self.headers.get("Content-Length") or 0)
-            if n > MAX_POST_BYTES:
+            if n > limit:
                 self.rfile.read(min(n, 1_000_000))   # drain what was sent so the client sees the 413, not a reset
-                raise BodyTooLarge(f"the request body is too large (at most {MAX_POST_BYTES // 1024} KB)")
+                raise BodyTooLarge(f"the request body is too large (at most {limit // 1024} KB)")
             raw = self.rfile.read(n) if n else b""
             body = json.loads(raw.decode() or "{}")
             if not isinstance(body, dict):
@@ -2805,6 +2940,16 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 self._json(app.equity_history())
             elif path == "/api/portfolio-sectors":
                 self._json(app.portfolio_sectors())
+            elif path == "/api/portfolio-analysis":
+                self._json(app.portfolio_analysis())
+            elif path == "/api/groww-reports":
+                self._json(app.groww_reports())
+            elif path == "/api/portfolio-news":
+                from .ask import RateLimited
+                try:
+                    self._json(app.portfolio_news(self.client_address[0]))
+                except RateLimited as e:
+                    self._json({"error": str(e)}, HTTPStatus.TOO_MANY_REQUESTS)
             elif path == "/api/my-portfolio":
                 from urllib.parse import parse_qs
                 q = parse_qs(urlparse(self.path).query)
@@ -3029,7 +3174,7 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
 
         def _post(self, app: App, path: str) -> None:
             try:
-                body = self._body()
+                body = self._body(REPORT_POST_BYTES if path == "/api/groww-report" else MAX_POST_BYTES)
                 if path in HALT_REFUSED_POSTS:
                     app.halted(f"use {path}")
                 if path == "/api/ask":
@@ -3038,6 +3183,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                         self._json(app.ask(body.get("text"), self.client_address[0], body.get("ticker", body.get("scope_ticker"))))
                     except RateLimited as e:
                         self._json({"error": str(e)}, HTTPStatus.TOO_MANY_REQUESTS)
+                elif path == "/api/groww-report":
+                    self._json(app.import_groww_report(str(body.get("name") or ""), str(body.get("data") or "")))
                 elif path == "/api/kill-switch":
                     self._json(app.kill_switch(body.get("confirm"), body.get("cancel_gtt") is True))
                 elif path == "/api/integration/run":
