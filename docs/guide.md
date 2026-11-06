@@ -116,6 +116,17 @@ Replays are saved in `state/replay/<name>/`. Nothing on the Replay or Demo pages
 real orders and settings. Its top tiles are your Groww holdings value, profit / loss and holding
 count ("n/a" until Groww is linked).
 
+**Portfolio analysis** (Live, under your holdings) breaks your Groww holdings down the way Groww's own analysis screen does,
+from the holdings the page already loaded (it never calls Groww): **Asset allocation** (stocks and debt),
+**Market cap** (large, mid, small) and **Sector allocation**, each as a stacked bar and a list showing the current value and,
+below it, the amount invested; the **Current / Invested** switch changes which of the two the percentages and bars follow
+(the choice is remembered in the browser). Large cap is the NIFTY 100, mid cap the NIFTY Midcap 150 and small cap the NIFTY
+Smallcap 250, so it is close to AMFI's top 100 / 101-250 / 251+ split but not identical; a stock outside those lists is
+"Other". The sector is NSE's industry from the NIFTY 500 list (the rest are "Others"). Market cap and sector cover stocks
+only, and a holding without a price counts at what you paid. **News on your holdings** shows the newest tagged headline for up to
+five holdings with each stock's change today; it is the same cached, tagged news the alerts use. Display only: nothing here
+places an order. (`/api/portfolio-analysis`, `/api/portfolio-news`.)
+
 **Demo** (`/demo`) is the same page on the same real data (same regime, deals, recommendations, look-up, news and
 My Groww portfolio) with the practice account added: the practice portfolio (account-value chart, positions, order
 form), practice tiles and "Paper buy/sell" buttons on recommendations. The practice account is

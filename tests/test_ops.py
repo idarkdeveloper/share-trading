@@ -527,7 +527,7 @@ def test_server_rebuilds_from_forward_start_then_runs_the_normal_flow(settings, 
     monkeypatch.setattr(forward_schedule, "rebuild_for_settings", fake_rebuild)
     monkeypatch.setattr(forward_schedule, "datetime", SimpleNamespace(now=lambda tz=None: datetime(2026, 10, 12, 16, 30, tzinfo=IST)))
     monkeypatch.setattr("trading_agent.screen.load_universe", lambda u: [{"symbol": x, "name": x, "industry": ""} for x in "ABCD"])
-    monkeypatch.setattr("trading_agent.screen.run_screen", lambda members, prices, top=20: screen_by_last_close_momentum(prices))
+    monkeypatch.setattr("trading_agent.screen.run_screen", lambda members, prices, top=20, **kw: screen_by_last_close_momentum(prices))   # **kw: bands and filters
     text = run_forward_due(s, FakePrices(FUTURE), Holidays(), None, today=date(2026, 10, 12))
     assert called["asof"] == ASOF and "Forward test" in text
     # a start date that is today or later is not "earlier than today": refuse

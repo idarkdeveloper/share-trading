@@ -1725,6 +1725,100 @@ def test_the_paper_cards_show_the_nifty_50_and_cash_comparisons():
     assert "a.refs" in body and "extra context over the same days, not a pass or fail" in body
 
 
+def test_portfolio_analysis_endpoint_reads_the_loaded_holdings_and_never_groww(server, monkeypatch):
+    base, app = server
+    assert "Live page" in _get(base + "/api/portfolio-analysis")[1]["message"]            # the Demo page has no Groww portfolio
+    app.demo_trades = None                                                                  # now the Live page
+    status, j = _get(base + "/api/portfolio-analysis")
+    assert status == 200 and j["available"] is False and "not loaded" in j["message"]      # nothing loaded yet
+    holdings = [{"symbol": "AAA", "kind": "equity", "value": 600.0, "invested": 500.0, "price": 60.0, "qty": 10},
+                {"symbol": "ZZZ", "kind": "equity", "value": 100.0, "invested": 90.0, "price": 10.0, "qty": 10},
+                {"symbol": "BOND", "kind": "bond", "value": 1001.0, "invested": 1000.0, "price": 1001.0, "qty": 1}]
+    app._my_portfolio = {"linked": True, "at": "2026-11-06T10:00:00+05:30", "holdings": holdings}
+    monkeypatch.setattr(app, "_index_members", lambda: [{"symbol": "AAA", "industry": "Information Technology"}])
+    monkeypatch.setattr(app, "_cap_classes", lambda: {"AAA": "large"})
+    status, j = _get(base + "/api/portfolio-analysis")
+    assert status == 200 and j["available"] is True and j["holdings"] == 3 and j["stocks"] == 2
+    assert [a["name"] for a in j["asset"]] == ["Stocks", "Debt"] and j["asset"][1]["current"] == 1001.0
+    assert {c["name"]: c["count"] for c in j["cap"]} == {"Large cap": 1, "Mid cap": 0, "Small cap": 0, "Other": 1}
+    assert [x["name"] for x in j["sector"]] == ["Information Technology", "Others"] and j["as_of"] == "2026-11-06T10:00:00+05:30"
+    app._my_portfolio = {"linked": True, "error": "Groww said no"}
+    assert "Groww said no" in _get(base + "/api/portfolio-analysis")[1]["message"]
+    app._my_portfolio = {"linked": True, "holdings": []}
+    assert "No holdings" in _get(base + "/api/portfolio-analysis")[1]["message"]
+
+
+def test_cap_classes_are_read_from_three_nse_lists_and_kept_only_when_all_loaded(server, monkeypatch):
+    import trading_agent.screen as screen
+    base, app = server
+    lists = {"NIFTY100": ["AAA"], "NIFTYMIDCAP150": ["CCC"], "NIFTYSMALLCAP250": ["EEE"]}
+    calls = []
+
+    def fake(name, session=None):
+        calls.append(name)
+        if name not in lists:
+            raise ValueError(name)
+        return [{"symbol": s, "name": s, "industry": ""} for s in lists[name]]
+    monkeypatch.setattr(screen, "load_universe", fake)
+    assert app._cap_classes() == {"AAA": "large", "CCC": "mid", "EEE": "small"} and len(calls) == 3
+    app._cap_classes()
+    assert len(calls) == 3                                                                   # kept for 12 hours
+    app._caps_cache = None
+    lists.pop("NIFTYMIDCAP150")
+    assert app._cap_classes() == {"AAA": "large", "EEE": "small"}                            # a failed list is skipped...
+    assert app._caps_cache is None                                                           # ...and not remembered
+
+
+def test_portfolio_news_gives_the_newest_headline_per_holding_with_its_change_today(server, monkeypatch):
+    base, app = server
+    app._my_portfolio = {"linked": True, "holdings": [{"symbol": s, "price": p, "exchange": "NSE"} for s, p in
+                         (("AAA", 102.0), ("BBB", 50.0), ("CCC", 10.0), ("DDD", 5.0), ("EEE", 5.0), ("FFF", 5.0))]}
+    items = [{"symbol": "AAA", "title": "Newest AAA", "tag": "positive", "source": "Src", "time_ist": "10:00", "link": "https://x/1"},
+             {"symbol": "AAA", "title": "Older AAA", "tag": "neutral", "source": "Src", "time_ist": "09:00", "link": ""}] \
+        + [{"symbol": s, "title": f"{s} news", "tag": "negative", "source": "S", "time_ist": "08:00", "link": ""} for s in ("BBB", "CCC", "DDD", "EEE", "FFF")]
+    monkeypatch.setattr(app, "_news_today", lambda scope, ticker: {"items": items, "note": None, "as_of": "t"})
+    monkeypatch.setattr(app, "_ohlc", lambda sym, span="5y": ([{"close": 90.0}, {"close": 100.0}, {"close": 101.0}], None))
+    status, j = _get(base + "/api/portfolio-news")
+    assert status == 200 and [i["symbol"] for i in j["items"]] == ["AAA", "BBB", "CCC", "DDD", "EEE"]   # one each, five at most
+    assert j["items"][0]["title"] == "Newest AAA" and j["items"][0]["link"] == "https://x/1"
+    assert j["items"][0]["change_pct"] == pytest.approx(102.0 / 100.0 - 1.0)             # the price against the close before the latest bar
+    monkeypatch.setattr(app, "_ohlc", lambda sym, span="5y": (None, "no data"))
+    app._news_cache.clear()
+    assert all(i["change_pct"] is None for i in _get(base + "/api/portfolio-news")[1]["items"])
+
+
+def test_news_links_are_only_http_or_https(server, monkeypatch):
+    base, app = server
+
+    class Svc:
+        def for_symbol(self, sym, name=None, background=False):
+            from datetime import datetime, timedelta
+            from trading_agent.timezones import IST
+            now = datetime.now(IST)
+            return {"items": [{"title": "t", "link": "javascript:alert(1)", "source": "s", "sentiment": "positive",
+                               "published": (now - timedelta(minutes=5)).isoformat()},
+                              {"title": "u", "link": "https://example.com/a", "source": "s", "sentiment": "bogus",
+                               "published": (now - timedelta(minutes=10)).isoformat()}]}
+    app.demo_trades = None                                                                  # the Demo page has no news service
+    app._news = Svc()
+    monkeypatch.setattr(app, "_held_symbols", lambda: {"AAA"})
+    monkeypatch.setattr(app, "_screener_names", lambda symbols: {})
+    out = app._news_today("portfolio", None)
+    assert [i["link"] for i in out["items"]] == ["", "https://example.com/a"]
+    assert [i["tag"] for i in out["items"]] == ["positive", "neutral"]                       # an unknown tag reads as neutral
+
+
+def test_the_analysis_card_is_on_the_overview_and_hidden_off_the_live_page():
+    html = (Path(__file__).resolve().parent.parent / "trading_agent" / "ui" / "index.html").read_text(encoding="utf-8")
+    assert 'id="an-card"' in html and html.index('id="an-card"') < html.index('id="pp-card"') and 'id="an-card" data-anchor="analysis"' in html
+    for needle in ('id="an-asset"', 'id="an-cap"', 'id="an-sector"', 'id="an-news"', 'data-basis="current"', 'data-basis="invested"'):
+        assert needle in html, needle
+    body = html[html.index("let AN = null"):html.index('$("mp-refresh").addEventListener')]
+    assert '"/api/portfolio-analysis"' in body and '"/api/portfolio-news"' in body and 'MODE === "demo"' in body
+    assert 'localStorage.getItem("an-basis")' in body and "target=\"_blank\" rel=\"noopener noreferrer\"" in body
+    assert "loadAnalysis(!!force)" in html[html.index("function renderMyPortfolio"):][:400]
+
+
 def test_order_forms_show_a_live_price_line_from_the_read_only_lookup():
     ui = Path(__file__).resolve().parent.parent / "trading_agent" / "ui"
     index, replay_js = (ui / "index.html").read_text(encoding="utf-8"), (ui / "replay.js").read_text(encoding="utf-8")

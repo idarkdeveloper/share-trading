@@ -117,6 +117,18 @@
       </section>
     </div>
 
+    <section class="card an-card" id="an-card" data-anchor="analysis" aria-labelledby="an-h" hidden>
+      <div class="cardhead"><h2 id="an-h">Portfolio analysis</h2><span class="sub" id="an-sub"></span>
+        <div class="seg an-basis" role="group" aria-label="Show each share of the portfolio by" style="margin-left:auto"><button type="button" class="on" data-basis="current" aria-pressed="true">Current</button><button type="button" data-basis="invested" aria-pressed="false">Invested</button></div></div>
+      <div class="an-grid">
+        <section class="an-block" aria-labelledby="an-asset-h"><h3 id="an-asset-h">Asset allocation</h3><div id="an-asset"></div></section>
+        <section class="an-block" aria-labelledby="an-cap-h"><h3 id="an-cap-h">Market cap</h3><div id="an-cap"></div></section>
+        <section class="an-block" aria-labelledby="an-sector-h"><h3 id="an-sector-h">Sector allocation</h3><div id="an-sector"></div></section>
+        <section class="an-block" aria-labelledby="an-news-h"><h3 id="an-news-h">News on your holdings</h3><div id="an-news"></div></section>
+      </div>
+      <p class="sub an-foot" id="an-foot"></p>
+    </section>
+
     <div class="card" id="pp-card" hidden data-anchor="practice">
       <div class="cardhead"><h2>Practice portfolio</h2><span class="sub" id="pricesrc"></span></div>
       <div class="cardbody" style="padding-top:0;border-top:none;border-bottom:1px solid var(--line)"><div class="stats" id="pp-stats"></div></div>
@@ -1382,6 +1394,7 @@
   }
   function renderMyPortfolio(m, force){
     MP = m; if(S) renderTiles();
+    if(m && m.linked && !m.error) loadAnalysis(!!force);   // the analysis card reads the same holdings from the server
     if(S && S.settings && typeof paintDeals === "function") paintDeals(investorsOf(S.settings));
     paintGrowwRefresh(m);
     const keepRows = !force && sellEdit !== null && sellEdit.source === "groww";   // a what-if panel is open: don't rebuild under it
@@ -1495,6 +1508,60 @@
     const pls = (m.holdings || []).filter(h => h.pl != null).sort((x, y) => y.pl - x.pl), mx = Math.max(1, ...pls.map(h => Math.abs(h.pl)));
     $("mp-plbars").innerHTML = pls.map(h => `<div class="plrow"><a href="#" data-lookup="${esc(h.symbol)}" class="sym">${esc(h.symbol)}</a><div class="pltrack"><span class="neg">${h.pl < 0 ? `<i style="width:${(-h.pl / mx * 100).toFixed(1)}%"></i>` : ""}</span><span class="pos">${h.pl > 0 ? `<i style="width:${(h.pl / mx * 100).toFixed(1)}%"></i>` : ""}</span></div><b class="${toneOf(h.pl)}">${sinr(h.pl)}</b></div>`).join("");
   }
+  // ---- Portfolio analysis (Live page): asset allocation, market cap and sector as lists with the current value and the amount
+  // invested, and the newest headline for up to five holdings. /api/portfolio-analysis and /api/portfolio-news read what the page
+  // already loaded; nothing here calls Groww. The toggle only changes which of the two the percentages and bars follow.
+  let AN = null, ANN = null, anAt = 0, anBusy = false, anBasis = "current";
+  try { const b = localStorage.getItem("an-basis"); if(b === "current" || b === "invested") anBasis = b; } catch(e){}
+  const anShare = r => anBasis === "invested" ? r.share_invested : r.share_current;
+  function anFold(rows){   // at most six named sectors; the rest join "Others"
+    if(rows.length <= 7) return rows;
+    const head = rows.filter(r => r.name !== "Others").slice(0, 6), rest = rows.filter(r => !head.includes(r));
+    const sum = k => rest.reduce((t, r) => t + r[k], 0);
+    return head.concat([{name: "Others", count: sum("count"), current: sum("current"), invested: sum("invested"), pl: sum("pl"), share_current: sum("share_current"), share_invested: sum("share_invested")}]);
+  }
+  function anList(id, rows, noun){
+    const el = $(id); if(!el) return;
+    const seg = rows.map((r, i) => anShare(r) > 0 ? `<span style="flex:${(anShare(r) * 100).toFixed(3)};background:var(--sec-${i % 7 + 1})"></span>` : "").join("");
+    el.innerHTML = `<div class="an-bar" role="img" aria-label="${esc(rows.map(r => r.name + " " + (anShare(r) * 100).toFixed(1) + "%").join(", "))}">${seg}</div>`
+      + `<div class="an-colhead"><span>Share of ${anBasis === "invested" ? "invested" : "current value"}</span><span>Current <span class="sub">(Invested)</span></span></div>`
+      + rows.map((r, i) => `<div class="an-row"><i class="an-dot" style="background:var(--sec-${i % 7 + 1})" aria-hidden="true"></i><div class="an-name"><b>${esc(r.name)}</b><span class="sub">${r.count} ${noun}${r.count === 1 ? "" : "s"} · ${(anShare(r) * 100).toFixed(2)}%</span></div><div class="an-amt"><b class="${toneOf(r.pl)}">${esc(inr(r.current, 2))}</b><span class="sub">${esc(inr(r.invested, 2))}</span></div></div>`).join("");
+  }
+  function renderAnalysis(){
+    const card = $("an-card"); if(!card) return;
+    const ok = MODE !== "demo" && AN && AN.available;
+    card.hidden = !ok; if(!ok) return;
+    $("an-sub").textContent = `${AN.stocks} stock${AN.stocks === 1 ? "" : "s"}${AN.holdings > AN.stocks ? ` + ${AN.holdings - AN.stocks} debt` : ""} · from your Groww holdings`;
+    anList("an-asset", AN.asset, "holding");
+    anList("an-cap", AN.cap, "stock");
+    anList("an-sector", anFold(AN.sector), "stock");
+    const notes = [];
+    if(!AN.caps_known) notes.push("The market-cap lists could not be read, so every stock shows as Other.");
+    if(!AN.sectors_known) notes.push("The sector list could not be read, so every stock shows as Others.");
+    if(AN.unpriced && AN.unpriced.length) notes.push(`Counted at what you paid (no price yet): ${AN.unpriced.join(", ")}.`);
+    notes.push("Large cap is the NIFTY 100, mid cap the NIFTY Midcap 150, small cap the NIFTY Smallcap 250; anything else is Other. Sector is NSE's industry for NIFTY 500 stocks; the rest are Others. Market cap and sector cover stocks only.");
+    $("an-foot").textContent = notes.join(" ");
+    card.querySelectorAll(".an-basis button").forEach(b => { const on = b.dataset.basis === anBasis; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); });
+  }
+  function renderAnalysisNews(){
+    const el = $("an-news"); if(!el) return;
+    const items = (ANN && ANN.items) || [];
+    el.innerHTML = items.length ? items.map(n => `<div class="an-news-row"><div class="an-news-top"><a href="#" data-lookup="${esc(n.symbol)}" class="sym">${esc(n.symbol)}</a>${n.change_pct != null ? `<b class="${toneOf(n.change_pct)}">${esc(spct(n.change_pct))}</b>` : ""}</div>${n.link ? `<a class="an-headline" href="${esc(n.link)}" target="_blank" rel="noopener noreferrer">${esc(n.title)}</a>` : `<span class="an-headline">${esc(n.title)}</span>`}<div class="sub">${esc(n.source || "")}${n.time_ist ? ` · ${esc(n.time_ist)} IST` : ""} <span class="an-tag ${esc(n.tag)}">${esc(n.tag)}</span></div></div>`).join("")
+      : `<div class="sub">${esc((ANN && (ANN.error || ANN.note)) || "No recent news on your holdings.")}</div>`;
+  }
+  async function loadAnalysis(force){
+    if(MODE === "demo" || anBusy || (!force && Date.now() - anAt < 60000)) return;
+    anBusy = true;
+    try { AN = await api("/api/portfolio-analysis"); } catch(e){ AN = {available: false}; }
+    renderAnalysis();
+    try { ANN = await api("/api/portfolio-news"); } catch(e){ ANN = {items: [], error: e.message}; }
+    anBusy = false; anAt = Date.now(); renderAnalysisNews();
+  }
+  document.querySelectorAll("#an-card .an-basis button").forEach(b => b.addEventListener("click", () => {
+    anBasis = b.dataset.basis === "invested" ? "invested" : "current";
+    try { localStorage.setItem("an-basis", anBasis); } catch(e){}
+    renderAnalysis();
+  }));
   $("mp-refresh").addEventListener("click", () => TA.loader.busy($("mp-refresh"), () => loadMyPortfolio(true),
     {busy: "Refreshing…", done: () => MP && !MP.error ? "Updated" : null}));
   // "Refresh from Groww": one read-only Groww read now, even outside market hours; off while a refused login cools down

@@ -1684,6 +1684,31 @@ body[data-mode="screener"] .sc-mtab, .sc-mtab { flex-direction: row; align-items
 .alloc-legend i { width: 10px; height: 10px; border-radius: 3px; }
 .alloc-legend span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .alloc-legend b { font-weight: 600; font-variant-numeric: tabular-nums; }
+/* Portfolio analysis: asset allocation, market cap, sector (a stacked bar and a list each) and the news on your holdings */
+.an-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px 28px; padding: 4px 18px 8px; }
+.an-block { min-width: 0; }
+.an-block h3 { margin: 0 0 10px; font-size: 15px; }
+.an-bar { display: flex; gap: 2px; height: 14px; border-radius: 7px; overflow: hidden; background: var(--color-divider); margin-bottom: 12px; }
+.an-bar span { min-width: 3px; }
+.an-colhead { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--color-muted); margin-bottom: 4px; }
+.an-row { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid var(--color-divider); }
+.an-dot { width: 4px; align-self: stretch; border-radius: 2px; }
+.an-name { display: flex; flex-direction: column; min-width: 0; }
+.an-name b { overflow-wrap: anywhere; font-weight: 600; }
+.an-name .sub, .an-amt .sub { font-size: 12px; }
+.an-amt { display: flex; flex-direction: column; align-items: flex-end; font-variant-numeric: tabular-nums; }
+.an-amt b { font-weight: 600; }
+.an-news-row { display: flex; flex-direction: column; gap: 3px; padding: 9px 0; border-top: 1px solid var(--color-divider); }
+.an-news-row:first-child { border-top: none; padding-top: 0; }
+.an-news-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-variant-numeric: tabular-nums; }
+.an-news-top a.sym { font-weight: 600; text-decoration: none; }
+.an-headline { font-size: 13.5px; line-height: 1.4; color: var(--color-text); overflow-wrap: anywhere; }
+a.an-headline { text-decoration: none; }
+a.an-headline:hover { text-decoration: underline; }
+.an-tag { display: inline-block; padding: 0 7px; border-radius: 5px; font-size: 11px; border: 1px solid var(--color-divider); }
+.an-tag.positive { color: var(--color-profit); border-color: var(--color-profit); }
+.an-tag.negative { color: var(--color-loss); border-color: var(--color-loss); }
+.an-foot { margin: 6px 18px 14px; font-size: 12px; max-width: 80ch; }
 .plbars { display: grid; gap: 5px; font-size: 12px; }
 .plrow { display: grid; grid-template-columns: 84px minmax(0, 1fr) 72px; gap: 8px; align-items: center; }
 .plrow .sym { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
