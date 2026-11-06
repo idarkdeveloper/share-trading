@@ -67,6 +67,7 @@
 
   <!-- ===================== Overview ===================== -->
   <section class="ws-panel" id="ws-overview" data-ws="overview" role="tabpanel" aria-labelledby="wst-overview">
+    <section class="needs" id="needs" aria-label="What needs you today"><span class="needs-title">What needs you today</span><span class="needs-chips" id="needs-chips"></span></section>
     <div class="ov-hero" id="mp-charts" hidden>
       <section class="card mp-chart mp-equity" aria-labelledby="mp-eq-h"><h3 id="mp-eq-h" class="sr-only">Portfolio value</h3>
         <div class="eq-head" id="mp-eq-head"></div>
@@ -370,6 +371,7 @@
     <section class="set-sec" id="set-appearance" aria-labelledby="set-appearance-t"><h3 id="set-appearance-t">Appearance</h3><p class="sub">Saved in this browser only.</p>
       <div class="menu-row theme-switch" role="group" aria-labelledby="theme-label"><span class="theme-label" id="theme-label">Theme</span><div class="seg"><button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button><button type="button" data-theme-choice="light" aria-pressed="false">Light</button><button type="button" data-theme-choice="auto" aria-pressed="true">Auto</button></div></div>
       <div class="menu-row" role="group" aria-labelledby="density-label"><span class="theme-label" id="density-label">Table rows</span><div class="seg"><button type="button" data-density="comfortable" aria-pressed="true">Comfortable</button><button type="button" data-density="compact" aria-pressed="false">Compact</button></div></div>
+      <div class="menu-row" role="group" aria-labelledby="text-label"><span class="theme-label" id="text-label">Text size</span><div class="seg"><button type="button" data-text="normal" aria-pressed="true">Normal</button><button type="button" data-text="large" aria-pressed="false">Large</button></div></div>
       <div class="menu-row" role="group" aria-labelledby="layout-label"><span class="theme-label" id="layout-label">Layout</span><div class="seg"><button type="button" data-layout="tabs" aria-pressed="true">Tabs</button><button type="button" data-layout="sections" aria-pressed="false">One page</button></div></div>
     </section>
     <div id="set-live">
@@ -660,6 +662,10 @@
     ev.preventDefault(); goWorkspace(n); const b = $("wst-" + n); if(b && b.focus) b.focus();
   });
   function setLayout(v){ layout = v === "sections" ? "sections" : "tabs"; store.set("liveLayout", layout); paintWorkspaces(); setTimeout(redrawCharts, 0); }
+  // Text size: "large" zooms the whole page about 15% (CSS zoom; kept in this browser). shortcut: a zoom, not a rem-based type scale.
+  function setText(v, save){ const big = v === "large"; document.documentElement.dataset.text = big ? "large" : "normal"; if(save) store.set("liveText", big ? "large" : "normal");   // saved only when chosen
+    document.querySelectorAll("[data-text]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.text === (big ? "large" : "normal")))); }
+  setText(store.get("liveText"), false);
   function setDensity(v){ density = v === "compact" ? "compact" : "comfortable"; store.set("liveDensity", density); paintWorkspaces(); }
 
   // ---- stop protection per real holding, and the freshness chip ----
@@ -724,6 +730,7 @@
       const h = await api("/api/health"), c = h.counts || {};
       $("hl-list").innerHTML = h.sources.map(healthItem).join("");
       $("hl-sub").textContent = `${c.failing || 0} failing · ${c.late || 0} late · ${c.ok || 0} ok · ${c.off || 0} not configured · ${hlTime(h.at)}`;
+      HEALTH_FAILING = c.failing || 0; renderNeeds();
       const badge = $("ws-health-count"); badge.hidden = !c.failing; badge.textContent = c.failing ? String(c.failing) : "";
       badge.title = c.failing ? `${c.failing} data source${c.failing === 1 ? "" : "s"} failing` : "";
       $("wst-health").setAttribute("aria-label", c.failing ? `Health, ${c.failing} failing` : "Health");
@@ -779,6 +786,7 @@
     const label = {risk_on: "Risk-on", risk_off: "Risk-off", neutral: "Neutral"}[r.regime] || esc(r.regime);
     el.innerHTML = `<span class="regime-chip ${cls}"><span class="dot" aria-hidden="true"></span>${label} · score ${r.score>=0?"+":""}${r.score}</span>
       <span class="sig"><span class="sig-why">${esc((r.signals||[]).join(" · "))}</span>${r.guidance ? `<span class="sig-sep"> — </span><span class="sig-guide">${esc(r.guidance)}</span>` : ""}</span>`;
+    paintHero();   // the headline sentence quotes this
     const m = r.markets || {};
     const fmt = (k, v) => k === "india_vix" ? v.toFixed(1) : k === "usdinr" ? v.toFixed(2) : Math.round(v).toLocaleString("en-IN");
     mk.innerHTML = ["nifty50","sp500","nasdaq_fut","nikkei","india_vix","usdinr","brent"]
@@ -802,7 +810,25 @@
             {n: nr, label: nr === 1 ? "new recommendation" : "new recommendations", go: "recs"},
             {n: ns, label: ns === 1 ? "practice stop hit" : "practice stops hit", go: "practice"}].filter(x => x.n);
   }
+  // "What needs you today": what is true now (not what changed since a visit): open recommendations, big losers, failing sources, a tripped friction gate.
+  let HEALTH_FAILING = 0, FRICTION_TRIPPED = false;
+  function needsItems(){
+    const out = [], day = 864e5;
+    const nr = S ? (S.recommendations || []).filter(r => !r.dismissed && (r.action === "buy" || r.action === "sell") && Date.now() - Date.parse(r.at) < 3 * day).length : 0;
+    if(nr) out.push({n: nr, label: nr === 1 ? "recommendation from the last 3 days" : "recommendations from the last 3 days", go: "recs"});
+    const down = MODE === "live" && MP && MP.holdings ? MP.holdings.filter(h => h.pl_pct != null && h.pl_pct <= -0.10).length : 0;
+    if(down) out.push({n: down, label: down === 1 ? "holding is down 10% or more" : "holdings are down 10% or more", go: "portfolio"});
+    if(HEALTH_FAILING) out.push({n: HEALTH_FAILING, label: HEALTH_FAILING === 1 ? "data source failing" : "data sources failing", go: "health"});
+    if(FRICTION_TRIPPED) out.push({n: "!", label: "friction gate tripped", go: "forward"});
+    return out;
+  }
+  function renderNeeds(){
+    const items = needsItems(), el = $("needs-chips"); if(!el) return;
+    el.innerHTML = items.length ? items.map(x => `<button type="button" class="needs-chip" data-since-go="${x.go}"><b>${x.n}</b> ${esc(x.label)} →</button>`).join("")
+      : '<span class="needs-clear"><i aria-hidden="true"></i>Nothing needs you right now</span>';
+  }
   function renderSince(){
+    renderNeeds();
     const items = sinceItems();
     $("since").hidden = !items.length;
     $("since-chips").innerHTML = items.map(x => `<button type="button" class="since-chip" data-since-go="${x.go}"><b>${x.n}</b> ${esc(x.label)} →</button>`).join("");
@@ -992,7 +1018,7 @@
     renderPracticeTax();
     noticeStopFills();
     const plTone = v => v == null ? "" : v > 0 ? "pl-profit" : v < 0 ? "pl-loss" : "";
-    if(!keepPositions) $("positions").innerHTML = S.positions.length ? S.positions.map(p => { const inv = p.qty * p.avg_entry_price, pc = inv ? p.unrealized_pl / inv : null; return `<tr><td style="font-weight:600"><a href="#" data-lookup="${esc(p.symbol)}" style="text-decoration:none">${esc(p.symbol)}</a>${p.source === "groww" ? ' <span class="pill" style="font-size:10px;padding:1px 6px">from Groww</span>' : ""}${(S.bands || {})[p.symbol] ? ` <span class="pill" title="NSE daily price band" style="font-size:10px;padding:1px 6px">Band ${esc(S.bands[p.symbol])}</span>` : ""}<div>${sellBtn("practice", p.symbol)}</div></td>
+    if(!keepPositions) $("positions").innerHTML = S.positions.length ? S.positions.map(p => { const inv = p.qty * p.avg_entry_price, pc = inv ? p.unrealized_pl / inv : null; return `<tr><td style="font-weight:600"><a href="#" data-lookup="${esc(p.symbol)}" style="text-decoration:none">${esc(p.symbol)}</a>${p.source === "groww" ? ' <span class="pill" style="font-size:12px;padding:1px 6px">from Groww</span>' : ""}${(S.bands || {})[p.symbol] ? ` <span class="pill" title="NSE daily price band" style="font-size:12px;padding:1px 6px">Band ${esc(S.bands[p.symbol])}</span>` : ""}<div>${sellBtn("practice", p.symbol)}</div></td>
         <td class="num">${p.qty}</td><td class="num">${money(p.avg_entry_price,2)}</td><td class="num">${money(p.current_price,2)}</td>
         <td class="num">${money(inv)}</td><td class="num">${money(p.market_value)}</td>
         <td class="num ${plTone(p.unrealized_pl)}">${signed(p.unrealized_pl)}</td><td class="num ${plTone(pc)}">${pc == null ? "n/a" : spctP(pc)}</td>
@@ -1396,6 +1422,8 @@
     return `<div class="stop-state ${esc(p.tone)}" title="${esc(protTitle(sym))}"><span class="dot" aria-hidden="true"></span>${esc(short)}<span class="sr-only">: ${esc(p.text)}</span></div>`
       + (sub ? `<div class="sub l2">${esc(sub)}</div>` : "") + (p.warning ? `<div class="stop-warn">${SAFE.icon("alert")}<span>${esc(p.warning)}</span></div>` : "");
   }
+  const OPEN_ROWS = new Set();   // phone: holdings rows the user has expanded (kept across refreshes)
+  const isPhone = () => typeof window.matchMedia === "function" && window.matchMedia("(max-width: 700px)").matches;
   function renderMyPortfolio(m, force){
     MP = m; if(S) renderTiles();
     if(m && m.linked && !m.error) loadAnalysis(!!force);   // the analysis card reads the same holdings from the server
@@ -1432,16 +1460,16 @@
       + stat("Return", spct(m.pl_pct), "vs what you paid", tone(m.pl_pct));
     const total = m.holdings.reduce((t, h) => t + (h.value || 0), 0);
     const sorted = m.holdings.slice().sort((x, y) => (y.value || 0) - (x.value || 0));   // biggest first, as on Groww
-    if(!keepRows) rows.innerHTML = sorted.length ? sorted.map(h => { const dm = dayMove(h); return `<tr data-open-stock="${esc(h.symbol)}">
+    if(!keepRows) rows.innerHTML = sorted.length ? sorted.map(h => { const dm = dayMove(h), isOpen = OPEN_ROWS.has(h.symbol) || (sellEdit && sellEdit.source === "groww" && sellEdit.symbol === h.symbol); return `<tr data-open-stock="${esc(h.symbol)}"${isOpen ? ' class="open"' : ""}>
         <td class="stock-cell"><div class="sym-line"><a href="#" data-lookup="${esc(h.symbol)}" class="sym" title="${esc(h.name || h.symbol)}">${esc(h.symbol)}</a>${h.kind === "bond" ? ` <span class="pill warn mini" title="bond${h.maturity ? " maturing " + esc(h.maturity) : ""}">Bond</span>` : ""}${h.exchange === "BSE" ? ' <span class="pill mini">BSE</span>' : ""}${(MP.bands || {})[h.symbol] ? ` <span class="pill mini" title="NSE daily price band">Band ${esc(MP.bands[h.symbol])}</span>` : ""}${((MP.filter_flags || {})[h.symbol] || []).map(f => ` <span class="pill warn mini" title="Review flag from the Indian-market filters; the agent never sells on it">${esc(f)}</span>`).join("")}${((MP.corp_actions || {})[h.symbol] || []).map(f => ` <span class="pill warn mini" title="Corporate action within 7 days: the GTT stop-loss is paused over the ex-date and re-set at the adjusted level">${esc(f)}</span>`).join("")}${insiderChip(h.symbol)}${fundsChip(h.symbol)}</div>${h.name ? `<div class="sub hname" title="${esc(h.name)}">${esc(h.name)}</div>` : ""}
           <div class="sub l2">${(() => { const rest = [total && h.value != null ? `${(h.value / total * 100).toFixed(1)}%` : "", h.sellable_qty < h.qty ? `${h.sellable_qty} free to sell` : ""].filter(Boolean).join(" · ");
           return rest; })()}</div>
           <div class="hold-line" title="shares (or units) owned × average buy price">${(() => { const rest = [total && h.value != null ? `${(h.value / total * 100).toFixed(1)}%` : "", h.sellable_qty < h.qty ? `${h.sellable_qty} free to sell` : ""].filter(Boolean);
           const unit = h.kind === "bond" ? "units" : Number(h.qty) === 1 ? "share" : "shares";
-          return [`<span class="n">${h.qty != null ? esc(h.qty) : "n/a"}</span> ${unit} × <span class="n">${h.avg_price != null ? inr(h.avg_price, 2) : "n/a"}</span>`].concat(rest, h.invested != null ? [`invested <span class="n">${inr(h.invested)}</span>`] : []).join(" · "); })()}</div>${h.price != null && MODE === "demo" ? `<div>${sellBtn("groww", h.symbol)}</div>` : ""}</td>
+          return [`<span class="n">${h.qty != null ? esc(h.qty) : "n/a"}</span> ${unit} × <span class="n">${h.avg_price != null ? inr(h.avg_price, 2) : "n/a"}</span>`].concat(rest).join(" · ") + (h.invested != null ? `<span class="hold-inv"> · invested <span class="n">${inr(h.invested)}</span></span>` : ""); })()}</div>${h.price != null && MODE === "demo" ? `<div>${sellBtn("groww", h.symbol)}</div>` : ""}<div class="row-more"><button type="button" class="small" data-open-full="${esc(h.symbol)}">Open full view →</button></div></td>
         <td class="spark-col">${sparkSvg(h.symbol)}</td>
         <td class="num nowrap hold-col">${h.qty != null ? esc(h.qty) : "n/a"}</td><td class="num nowrap hold-col">${h.avg_price != null ? inr(h.avg_price, 2) : "n/a"}</td>
-        <td class="num nowrap">${h.price != null ? inr(h.price, 2) + (h.price_date ? `<div class="sub" style="font-size:11px" title="${esc(h.price_source || "BSE close")}: the bond's last traded price">last traded ${esc(new Date(h.price_date + "T00:00:00").toLocaleDateString("en-IN", {day: "numeric", month: "short"}))}</div>` : "") : '<span class="sub">no price</span>'}</td>
+        <td class="num nowrap">${h.price != null ? inr(h.price, 2) + (h.price_date ? `<div class="sub" style="font-size:12px" title="${esc(h.price_source || "BSE close")}: the bond's last traded price">last traded ${esc(new Date(h.price_date + "T00:00:00").toLocaleDateString("en-IN", {day: "numeric", month: "short"}))}</div>` : "") : '<span class="sub">no price</span>'}</td>
         <td class="num nowrap ${dm ? tone(dm.pct) : ""}">${dm ? spct(dm.pct) : '<span class="sub">…</span>'}</td>
         <td class="num nowrap">${inr(h.value)}</td>
         <td class="num nowrap"><div class="${tone(h.pl)}">${sinr(h.pl)}</div><div class="l2 ${tone(h.pl_pct)}">${spct(h.pl_pct)}</div></td>${MODE === "demo" ? "" : `<td class="prot-cell">${stopCellLive(h.symbol)}</td>`}</tr>${sellEdit && sellEdit.source === "groww" && sellEdit.symbol === h.symbol ? sellPanelRow(MPCOLS) : ""}`; }).join("")
@@ -1451,7 +1479,7 @@
         <td></td><td class="num hold-col"></td><td class="num hold-col">${m.invested != null ? inr(m.invested) : ""}</td><td></td><td class="num nowrap ${tone(today)}">${today == null ? "" : sinr(today)}</td><td class="num">${inr(m.value)}</td>
         <td class="num"><div class="${tone(m.pl)}">${sinr(m.pl)}</div><div class="l2 ${tone(m.pl_pct)}">${spct(m.pl_pct)}</div></td>${MODE === "demo" ? "" : "<td></td>"}</tr>` : "";
     loadSparks(m.holdings);
-    paintHero();
+    paintHero(); renderNeeds();
   }
   // Allocation by sector (a donut) and profit/loss by holding (bars), drawn from the holdings already on the page.
   // The sector is NSE's industry from the NIFTY 500 list (/api/portfolio-sectors); a bond is "Bonds", anything not in the list "Other".
@@ -1487,7 +1515,13 @@
     const delta = (v, p, label) => `<span class="eq-delta ${toneOf(v)}">${esc(sinr(v))} (${p >= 0 ? "+" : "−"}${Math.abs(p).toFixed(2)}%) · ${label}</span>`;
     $("mp-eq-head").innerHTML = `<span class="eq-k">${prac ? "PRACTICE ACCOUNT · PRACTICE MONEY" : "HOLDINGS VALUE · GROWW"}</span><b class="eq-big">${esc(inr(total))}</b>`
       + (pl != null ? delta(pl, plPct, prac ? "since start" : "vs what you paid") : "")
-      + (chg != null ? delta(chg, chgPct, back.length > 1 ? "1M" : "since " + esc(series[0][0])).replace('class="eq-delta ', 'class="eq-delta eq-small ') : "");
+      + (chg != null ? delta(chg, chgPct, back.length > 1 ? "1M" : "since " + esc(series[0][0])).replace('class="eq-delta ', 'class="eq-delta eq-small ') : "")
+      + (() => {   // one plain sentence: where you stand, then what the market says to do about it
+          const rg = S && S.regime && !S.regime.error ? S.regime : null, up = pl != null && pl >= 0;
+          const a = pl == null ? "" : `${up ? "Up" : "Down"} ${inr(Math.abs(pl))} (${Math.abs(plPct).toFixed(1)}%) ${prac ? "since you started" : "against what you paid"}. `;
+          const b = rg ? `The market is ${({risk_on: "risk-on", risk_off: "risk-off", neutral: "neutral"})[rg.regime] || rg.regime}${rg.guidance ? ": " + String(rg.guidance).replace(/\.$/, "") : ""}.` : "";
+          return a || b ? `<p class="eq-line">${esc(a + b)}</p>` : "";
+        })();
     if(back.length < 2 && real.length < 2){ box.innerHTML = '<div class="sub">The chart appears once prices for your holdings have loaded.</div>'; note.textContent = ""; return; }
     const inv = m.invested > 0 ? m.invested : null;
     if(!TA.valueChart(box, {back, real, inv, up: pl != null ? pl >= 0 : !(chg != null && chg < 0)})){ box.innerHTML = '<div class="sub">The chart library did not load.</div>'; note.textContent = ""; return; }
@@ -1632,6 +1666,7 @@
   function renderFriction(f){   // the forward test's friction gate: a banner on Live and Demo, never a setting change
     const b = $("friction-banner"); if(!b) return;
     const g = f && f.telemetry && f.telemetry.gate;
+    FRICTION_TRIPPED = !!(g && g.tripped); renderNeeds();
     b.hidden = !(g && g.tripped);
     b.textContent = g && g.tripped ? g.text : "";
   }
@@ -2205,13 +2240,17 @@
     const b = ev.target.closest("button");
     if(!b){   // a click anywhere on a holding or deal row opens that stock (its ticker link is the keyboard way in)
       const tr = ev.target.closest("tr[data-open-stock]");
-      if(tr && !ev.target.closest("a, input, select, textarea, label, summary")) lookup(tr.dataset.openStock);
+      if(tr && !ev.target.closest("a, input, select, textarea, label, summary, button")){
+        if(isPhone() && tr.closest("#mp-rows")){ const k = tr.dataset.openStock; if(OPEN_ROWS.has(k)) OPEN_ROWS.delete(k); else OPEN_ROWS.add(k); tr.classList.toggle("open"); }   // phone: a tap opens the row's details
+        else lookup(tr.dataset.openStock);
+      }
       return;
     }
     if(b.dataset.wsTab){ goWorkspace(b.dataset.wsTab); return; }
     if(b.dataset.sinceGo){ goWorkspace(b.dataset.sinceGo, true); return; }
     if(b.dataset.openFull){ lookup(b.dataset.openFull); return; }
     if(b.dataset.sizeIt){ $("sz-ticker").value = b.dataset.sizeIt; goWorkspace("size"); palCentre($("sz-form")); if($("sz-form").requestSubmit) $("sz-form").requestSubmit(); return; }
+    if(b.dataset.text){ setText(b.dataset.text, true); return; }
     if(b.dataset.density){ setDensity(b.dataset.density); return; }
     if(b.dataset.layout){ setLayout(b.dataset.layout); return; }
     if(b.dataset.dfilRemove !== undefined){ dfil = dfil.filter((_, j) => j !== Number(b.dataset.dfilRemove)); render(true); $("deal-add").focus(); return; }

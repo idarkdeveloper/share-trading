@@ -601,7 +601,15 @@ class Watcher:
                 fresh = b.new_for(self.interesting_tickers())
                 if fresh and self._notifier is not None:
                     subject, body = alert(fresh)
-                    self._notifier.send(_plain(subject), _plain(body))
+                    card = None
+                    if what == "insider book":   # the insider alert is an email card like the news one; the institutions' deals stay plain
+                        try:
+                            from .alert_cards import insider_card
+                            card = insider_card(fresh)
+                        except Exception:  # noqa: BLE001 - the text email still goes
+                            log.exception("insider card failed")
+                    from .agent import send_with_html
+                    send_with_html(self._notifier, _plain(subject), _plain(body), card)
             except Exception as e:  # noqa: BLE001 - a second source: the watch carries on
                 log.warning("%s refresh failed: %s", what, e)
 
