@@ -127,6 +127,25 @@ only, and a holding without a price counts at what you paid. **News on your hold
 five holdings with each stock's change today; it is the same cached, tagged news the alerts use. Display only: nothing here
 places an order. (`/api/portfolio-analysis`, `/api/portfolio-news`.)
 
+**Importing Groww's reports** gives the card what Groww's API cannot: dividends, XIRR and realised profit. Download two reports
+from Groww and use **Import reports** on the card (or `python -m trading_agent groww-report FILE...` on the server): the
+**Dividend Report** (PDF) and the **Stocks P&L** report (xlsx). Only the table rows are kept, in `state/groww_reports.json`
+(company, ISIN, dates, amounts); the client code, PAN and bank account in the reports' headers are never read into it. A
+new import replaces the previous one of the same kind, and the dividend rows are checked against the report's own total.
+It then shows:
+
+- **Dividends:** the total and the amount per calendar quarter of the ex-date, the way Groww's screen groups them.
+- **Returns (XIRR):** the annualised money-weighted return of every lot in the P&L report (each buy is money out on its buy
+  date, each sale money in on its sell date, the shares you still hold are counted at the report's closing price, and
+  dividends are money in on their ex-date), before the charges the report lists. Under it, what **the same buys and sales**
+  would have returned in the Nifty 50 (NIFTYBEES), Midcap 150 (MID150BEES) and Smallcap 250 (HDFCSML250) funds, with the gap in
+  points. A fund whose Yahoo price history does not reach back to your first buy is left out, and the card says so.
+- **Realised profit and charges:** realised profit split by how long each lot was held (over a year, under a year, same day),
+  the charges paid and the largest of them, and what you still hold. The split is information, not tax advice.
+
+The reports cover the period you chose when downloading them; the card shows that period. Import them again after a new
+download to refresh. (`/api/groww-reports`, `POST /api/groww-report`.)
+
 **Demo** (`/demo`) is the same page on the same real data (same regime, deals, recommendations, look-up, news and
 My Groww portfolio) with the practice account added: the practice portfolio (account-value chart, positions, order
 form), practice tiles and "Paper buy/sell" buttons on recommendations. The practice account is

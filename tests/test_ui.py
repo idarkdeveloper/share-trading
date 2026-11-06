@@ -1819,6 +1819,87 @@ def test_the_analysis_card_is_on_the_overview_and_hidden_off_the_live_page():
     assert "loadAnalysis(!!force)" in html[html.index("function renderMyPortfolio"):][:400]
 
 
+def test_groww_reports_are_imported_summarised_and_cached(server, monkeypatch):
+    import base64
+    from tests.test_groww_reports import DIV_TEXT, PNL_ROWS, make_xlsx
+    from trading_agent import groww_reports as gr
+    base, app = server
+    b64 = lambda b: base64.b64encode(b).decode()  # noqa: E731
+    xlsx = make_xlsx({"Trade Level": PNL_ROWS})
+    app.demo_trades = None                                                                  # a Live app, with its own Demo child
+    with pytest.raises(PermissionError, match="Live page"):
+        app.demo.import_groww_report("a.xlsx", b64(xlsx))                                   # the Demo page has no Groww reports
+    app.demo_trades = []
+    assert _get(base + "/api/groww-reports")[1] == {"dividends": None, "pnl": None, "returns": None, "skipped": []}
+    status, j = _post(base + "/api/groww-report", {"name": "pnl.xlsx", "data": b64(xlsx)})
+    assert status == 200 and j == {"ok": True, "kind": "pnl", "lots": 4, "realised": 1210.0, "unrealised": 200.0}
+    monkeypatch.setattr(gr, "parse_dividend_pdf", lambda data: gr.parse_dividend_text(DIV_TEXT))
+    status, j = _post(base + "/api/groww-report", {"name": "div.pdf", "data": b64(b"%PDF-1.4 stand-in")})
+    assert status == 200 and j == {"ok": True, "kind": "dividends", "rows": 3, "total": 12985.5, "check": True}
+    status, j = _post(base + "/api/groww-report", {"name": "x", "data": "***not base64***"})
+    assert status == 400 and "did not arrive intact" in j["error"]
+    status, j = _post(base + "/api/groww-report", {"name": "notes.txt", "data": b64(b"hello")})
+    assert status == 400 and j["error"].startswith("notes.txt: ") and "Dividend Report" in j["error"]
+    assert gr.load(app.settings.state_dir)["pnl"]["realised"][0]["name"] == "ALPHA INDUSTRIES LTD."   # saved as rows
+
+    calls = []
+
+    class Prices:
+        def history(self, sym, rng):
+            calls.append(sym)
+            if sym != "NIFTYBEES":
+                raise RuntimeError("no data")
+            return [{"date": d, "close": 100.0, "adj_close": 100.0} for d in ("2024-12-01", "2025-06-01", "2026-11-05")]
+    monkeypatch.setattr(app, "prices", Prices())
+    status, j = _get(base + "/api/groww-reports")
+    assert status == 200 and j["dividends"]["total"] == 12985.5 and j["dividends"]["quarters"][-1]["amount"] == 12500.0
+    assert j["pnl"]["realised"] == 1210.0 and [x["name"] for x in j["pnl"]["split"]] == ["Over a year", "Under a year", "Intraday"]
+    assert j["returns"]["available"] and [b["symbol"] for b in j["returns"]["benchmarks"]] == ["NIFTYBEES"]
+    assert j["skipped"] == ["Nifty Midcap 150", "Nifty Smallcap 250"]                      # named, not silently dropped
+    n = len(calls)
+    _get(base + "/api/groww-reports")
+    assert len(calls) == n                                                                     # kept 15 minutes
+    _post(base + "/api/groww-report", {"name": "pnl.xlsx", "data": b64(xlsx)})
+    _get(base + "/api/groww-reports")
+    assert len(calls) > n                                                                      # a new import drops it
+
+
+def test_a_report_may_be_bigger_than_an_ordinary_post_but_only_on_its_own_endpoint(server):
+    import base64
+    base, app = server
+    big = {"name": "x", "data": base64.b64encode(b"0" * 100_000).decode()}                    # ~133 KB of JSON
+    status, j = _post(base + "/api/groww-report", big)
+    assert status == 400 and "Dividend Report" in j["error"]                                  # read, then refused as not a report
+    status, j = _post(base + "/api/ask", {"text": "x" * 70_000})
+    assert status == 413
+
+
+def test_the_groww_report_command_imports_files_and_says_what_it_found(tmp_path, monkeypatch, capsys, settings):
+    from types import SimpleNamespace
+    from tests.test_groww_reports import PNL_ROWS, make_xlsx
+    from trading_agent import cli
+    from trading_agent import groww_reports as gr
+    f = tmp_path / "pnl.xlsx"
+    f.write_bytes(make_xlsx({"Trade Level": PNL_ROWS}))
+    bad = tmp_path / "bad.txt"
+    bad.write_text("hello")
+    monkeypatch.setattr(cli, "_settings", lambda args: settings)
+    assert cli.cmd_groww_report(SimpleNamespace(files=[str(f), str(bad), str(tmp_path / "missing.pdf")])) == 1
+    out = capsys.readouterr().out
+    assert "3 realised and 1 held lots, realised 1,210.00, unrealised 200.00, charges 39.10" in out and "bad.txt: send Groww" in out
+    assert "missing.pdf" in out and gr.load(settings.state_dir)["pnl"]["charges_total"] == 39.1
+
+
+def test_the_card_has_the_returns_dividends_and_profit_blocks_and_an_import_that_only_posts_a_report():
+    html = (Path(__file__).resolve().parent.parent / "trading_agent" / "ui" / "index.html").read_text(encoding="utf-8")
+    for needle in ('id="an-import"', 'id="an-file"', 'id="an-ret"', 'id="an-div"', 'id="an-pnl"', 'accept=".pdf,.xlsx'):
+        assert needle in html, needle
+    reads = html[html.index("let AN = null"):html.index('$("mp-refresh").addEventListener')]
+    assert 'api("/api/groww-reports")' in reads and "POST" not in reads and "/api/groww-report\"," not in reads    # the read block only reads
+    imp = html[html.index("async function anImport"):html.index("function renderFriction")]
+    assert imp.count("api(") == 1 and 'api("/api/groww-report", {name: f.name, data: btoa(bin)})' in imp and "3 * 1024 * 1024" in imp
+
+
 def test_order_forms_show_a_live_price_line_from_the_read_only_lookup():
     ui = Path(__file__).resolve().parent.parent / "trading_agent" / "ui"
     index, replay_js = (ui / "index.html").read_text(encoding="utf-8"), (ui / "replay.js").read_text(encoding="utf-8")

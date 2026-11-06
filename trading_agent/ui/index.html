@@ -119,12 +119,16 @@
 
     <section class="card an-card" id="an-card" data-anchor="analysis" aria-labelledby="an-h" hidden>
       <div class="cardhead"><h2 id="an-h">Portfolio analysis</h2><span class="sub" id="an-sub"></span>
-        <div class="seg an-basis" role="group" aria-label="Show each share of the portfolio by" style="margin-left:auto"><button type="button" class="on" data-basis="current" aria-pressed="true">Current</button><button type="button" data-basis="invested" aria-pressed="false">Invested</button></div></div>
+        <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap"><button type="button" class="small" id="an-import" title="Import Groww's Dividend Report (PDF) and Stocks P&amp;L report (xlsx)">Import reports</button><input type="file" id="an-file" accept=".pdf,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple hidden>
+        <div class="seg an-basis" role="group" aria-label="Show each share of the portfolio by"><button type="button" class="on" data-basis="current" aria-pressed="true">Current</button><button type="button" data-basis="invested" aria-pressed="false">Invested</button></div></span></div>
       <div class="an-grid">
         <section class="an-block" aria-labelledby="an-asset-h"><h3 id="an-asset-h">Asset allocation</h3><div id="an-asset"></div></section>
         <section class="an-block" aria-labelledby="an-cap-h"><h3 id="an-cap-h">Market cap</h3><div id="an-cap"></div></section>
         <section class="an-block" aria-labelledby="an-sector-h"><h3 id="an-sector-h">Sector allocation</h3><div id="an-sector"></div></section>
         <section class="an-block" aria-labelledby="an-news-h"><h3 id="an-news-h">News on your holdings</h3><div id="an-news"></div></section>
+        <section class="an-block" aria-labelledby="an-ret-h"><h3 id="an-ret-h">Returns (XIRR)</h3><div id="an-ret"></div></section>
+        <section class="an-block" aria-labelledby="an-div-h"><h3 id="an-div-h">Dividends</h3><div id="an-div"></div></section>
+        <section class="an-block" aria-labelledby="an-pnl-h"><h3 id="an-pnl-h">Realised profit and charges</h3><div id="an-pnl"></div></section>
       </div>
       <p class="sub an-foot" id="an-foot"></p>
     </section>
@@ -1549,13 +1553,40 @@
     el.innerHTML = items.length ? items.map(n => `<div class="an-news-row"><div class="an-news-top"><a href="#" data-lookup="${esc(n.symbol)}" class="sym">${esc(n.symbol)}</a>${n.change_pct != null ? `<b class="${toneOf(n.change_pct)}">${esc(spct(n.change_pct))}</b>` : ""}</div>${n.link ? `<a class="an-headline" href="${esc(n.link)}" target="_blank" rel="noopener noreferrer">${esc(n.title)}</a>` : `<span class="an-headline">${esc(n.title)}</span>`}<div class="sub">${esc(n.source || "")}${n.time_ist ? ` · ${esc(n.time_ist)} IST` : ""} <span class="an-tag ${esc(n.tag)}">${esc(n.tag)}</span></div></div>`).join("")
       : `<div class="sub">${esc((ANN && (ANN.error || ANN.note)) || "No recent news on your holdings.")}</div>`;
   }
+  // The imported Groww reports (dividends, XIRR, realised profit): GET /api/groww-reports. The import itself is further down.
+  let GR = null;
+  const anPts = v => v == null ? "" : (v >= 0 ? "ahead by " : "behind by ") + Math.abs(v * 100).toFixed(2) + " pts";
+  function renderReports(){
+    const d = GR && GR.dividends, p = GR && GR.pnl, r = GR && GR.returns;
+    const none = '<div class="sub">Import your Groww reports to see this: the Dividend Report (PDF) and the Stocks P&amp;L report (xlsx), from the Reports section of Groww.</div>';
+    const row = (a, b) => `<div class="an-brow"><span>${a}</span><span>${b}</span></div>`;
+    $("an-ret").innerHTML = r && r.available
+      ? `<div class="an-big ${toneOf(r.xirr)}">${esc(spct(r.xirr))}<span class="sub"> a year</span></div><div class="sub">${esc(shortDate(r.from))} to ${esc(shortDate(r.to))} · ${esc(inr(r.bought))} bought${r.with_dividends ? ", dividends included" : ""}, before charges</div>`
+        + (r.benchmarks || []).map(b => row(`The same money in ${esc(b.label)}`, `<b>${esc(spct(b.xirr))}</b> · <span class="${toneOf(b.gap)}">${esc(anPts(b.gap))}</span>`)).join("")
+        + ((GR.skipped || []).length ? `<div class="sub">Not shown (its price history is too short for this period): ${esc(GR.skipped.join(", "))}.</div>` : "")
+      : (p ? '<div class="sub">The XIRR could not be worked out from this report.</div>' : none);
+    const qs = d ? d.quarters.slice(-8).reverse() : [], mx = Math.max(1, ...qs.map(q => q.amount));
+    $("an-div").innerHTML = d
+      ? `<div class="an-big">${esc(inr(d.total, 2))}</div><div class="sub">${d.count} payment${d.count === 1 ? "" : "s"} from ${d.stocks} stock${d.stocks === 1 ? "" : "s"}${d.from ? ` · ex-dates ${esc(shortDate(d.from))} to ${esc(shortDate(d.to))}` : ""}</div>`
+        + qs.map(q => `<div class="an-qrow"><span class="an-qlabel">${esc(q.label)} <span class="sub">${q.year}</span></span><span class="an-qtrack"><i style="width:${(q.amount / mx * 100).toFixed(1)}%"></i></span><b>${esc(inr(q.amount, 2))}</b></div>`).join("")
+        + (d.by_stock.length ? `<div class="sub an-top">Most from: ${d.by_stock.slice(0, 3).map(s => `${esc(s.company)} ${esc(inr(s.amount))}`).join(" · ")}</div>` : "")
+      : none;
+    $("an-pnl").innerHTML = p
+      ? `<div class="an-big ${toneOf(p.realised)}">${esc(sinr(p.realised, 2))}</div><div class="sub">realised, ${esc(shortDate(p.from))} to ${esc(shortDate(p.to))}</div>`
+        + p.split.filter(x => x.lots).map(x => row(`${esc(x.name)} <span class="sub">${x.lots} lot${x.lots === 1 ? "" : "s"}</span>`, `<b class="${toneOf(x.pnl)}">${esc(sinr(x.pnl, 2))}</b>`)).join("")
+        + row("Charges paid", `<b>${esc(inr(p.charges_total, 2))}</b>`)
+        + (p.charges.length ? `<div class="sub an-top">${p.charges.slice(0, 4).map(c => `${esc(c.name)} ${esc(inr(c.amount, 2))}`).join(" · ")}</div>` : "")
+        + `<div class="sub an-top">Still held: ${p.held_lots} lot${p.held_lots === 1 ? "" : "s"}, cost ${esc(inr(p.held_cost))}, now ${esc(inr(p.held_value))} (${esc(sinr(p.unrealised, 2))}). The split is by how long each lot was held, not tax advice.</div>`
+      : none;
+  }
   async function loadAnalysis(force){
     if(MODE === "demo" || anBusy || (!force && Date.now() - anAt < 60000)) return;
     anBusy = true;
     try { AN = await api("/api/portfolio-analysis"); } catch(e){ AN = {available: false}; }
     renderAnalysis();
     try { ANN = await api("/api/portfolio-news"); } catch(e){ ANN = {items: [], error: e.message}; }
-    anBusy = false; anAt = Date.now(); renderAnalysisNews();
+    try { GR = await api("/api/groww-reports"); } catch(e){ GR = null; }
+    anBusy = false; anAt = Date.now(); renderAnalysisNews(); renderReports();
   }
   document.querySelectorAll("#an-card .an-basis button").forEach(b => b.addEventListener("click", () => {
     anBasis = b.dataset.basis === "invested" ? "invested" : "current";
@@ -1580,6 +1611,23 @@
         {busy: "Reading Groww…", done: "Updated", after: () => paintGrowwRefresh(MP)});
     } catch(e){ toast(e.message); }
   });
+
+  // ---- Import Groww reports: the Dividend Report (PDF) and the Stocks P&L report (xlsx) the owner downloaded from Groww. One POST of
+  // the file (base64) to /api/groww-report, which keeps only the table rows. It is not an order and touches nothing at Groww.
+  async function anImport(files){
+    for(const f of files){
+      try {
+        if(f.size > 3 * 1024 * 1024) throw new Error(`${f.name}: too large to be one of Groww's reports`);
+        const bytes = new Uint8Array(await f.arrayBuffer());
+        let bin = ""; for(let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        const r = await api("/api/groww-report", {name: f.name, data: btoa(bin)});
+        toast(r.kind === "dividends" ? `Dividend report imported: ${r.rows} payments, ${inr(r.total, 2)}${r.check === false ? " (the rows do not add up to the report's total)" : ""}` : `P&L report imported: ${r.lots} lots`);
+      } catch(e){ toast(e.message); }
+    }
+    loadAnalysis(true);
+  }
+  $("an-import").addEventListener("click", () => $("an-file").click());
+  $("an-file").addEventListener("change", e => { const fs = [...e.target.files]; e.target.value = ""; if(fs.length) anImport(fs); });
 
   function renderFriction(f){   // the forward test's friction gate: a banner on Live and Demo, never a setting change
     const b = $("friction-banner"); if(!b) return;

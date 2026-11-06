@@ -137,6 +137,7 @@ def _inr(v: float, d: int = 0) -> str:
 
 
 MAX_POST_BYTES = 64 * 1024   # a dashboard POST body is a few hundred bytes; anything bigger is refused (413)
+REPORT_POST_BYTES = 4 * 1024 * 1024   # except an imported Groww report (base64 of at most 3 MB)
 
 
 class BodyTooLarge(ValueError):
@@ -213,6 +214,7 @@ class App:
         self._candle_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
         self._members_cache: tuple[float, list[dict[str, str]]] | None = None
         self._caps_cache: tuple[float, dict[str, str]] | None = None   # {SYMBOL: large | mid | small}, 12 hours
+        self._reports_cache: tuple[Any, float, dict[str, Any]] | None = None   # the XIRR figures: (reports saved at, when, answer)
         from .fundamentals import YahooFundamentals
         from .quote import QuoteService
         self.quote_service = QuoteService(YahooFundamentals(None))  # P/E, market cap, 52-week range; 30 min per ticker
@@ -1555,6 +1557,58 @@ class App:
         out = analyse(rows, caps=self._cap_classes(), sectors=sectors)
         return {**out, "available": True, "as_of": m.get("prices_as_of") or m.get("at") or m.get("saved_at")}
 
+    REPORTS_TTL_SECONDS = 900.0
+
+    def groww_reports(self) -> dict[str, Any]:
+        """GET /api/groww-reports: what the imported Groww reports say (groww_reports.py, report_analysis.py): dividends by
+        quarter, realised profit and charges, and the XIRR against index funds. The XIRR reads the funds' prices (cached by the
+        price service) and is itself kept 15 minutes; a fund whose prices do not reach back to the first buy is left out."""
+        from . import groww_reports as gr
+        from . import report_analysis as ra
+        root = self._parent or self
+        data = gr.load(root.settings.state_dir)
+        stamp = (data.get("dividends", {}).get("imported_at"), data.get("pnl", {}).get("imported_at"))
+        hit = root._reports_cache
+        if hit is not None and hit[0] == stamp and time.time() - hit[1] < self.REPORTS_TTL_SECONDS:
+            return hit[2]
+        out: dict[str, Any] = {"dividends": ra.dividends_summary(data["dividends"]) if "dividends" in data else None,
+                               "pnl": ra.pnl_summary(data["pnl"]) if "pnl" in data else None, "returns": None, "skipped": []}
+        if "pnl" in data:
+            series: dict[str, dict[str, float]] = {}
+            for sym, _label in ra.BENCHMARKS:
+                try:
+                    series[sym] = {str(b["date"]): float(b.get("adj_close") or b["close"]) for b in self.prices.history(sym, "5y") if b.get("close")}
+                except Exception as e:  # noqa: BLE001 - a benchmark is a nicety
+                    log.warning("benchmark %s unavailable for the XIRR: %s", sym, e)
+            out["returns"] = ra.returns_summary(data["pnl"], data.get("dividends"), series)
+            got = {b["symbol"] for b in (out["returns"].get("benchmarks") or [])}
+            out["skipped"] = [label for sym, label in ra.BENCHMARKS if sym not in got]
+        root._reports_cache = (stamp, time.time(), out)
+        return out
+
+    def import_groww_report(self, name: str, data_b64: str) -> dict[str, Any]:
+        """POST /api/groww-report: one Groww report (Dividend Report PDF or Stocks P&L xlsx) as base64; parsed, checked and
+        saved as rows only (groww_reports.py). Live page only."""
+        import base64
+        import binascii
+        from . import groww_reports as gr
+        self._on_live_page("Importing a Groww report")
+        root = self._parent or self
+        try:
+            raw = base64.b64decode(data_b64, validate=True)
+        except (binascii.Error, ValueError):
+            raise ValueError("the file did not arrive intact; try again") from None
+        try:
+            kind, parsed = gr.parse_report(raw)
+        except gr.ReportError as e:
+            raise ValueError(f"{name or 'This file'}: {e}") from None
+        gr.save(root.settings.state_dir, kind, parsed)
+        root._reports_cache = None
+        if kind == "dividends":
+            return {"ok": True, "kind": kind, "rows": len(parsed["rows"]), "total": parsed["total"], "check": parsed["check"]}
+        return {"ok": True, "kind": kind, "lots": len(parsed["realised"]) + len(parsed["unrealised"]),
+                "realised": parsed["realised_pnl"], "unrealised": parsed["unrealised_pnl"]}
+
     PORTFOLIO_NEWS_ITEMS = 5
 
     def portfolio_news(self, client: str = "") -> dict[str, Any]:
@@ -2797,11 +2851,11 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             self._json(payload, status)
             return True
 
-        def _body(self) -> dict[str, Any]:
+        def _body(self, limit: int = MAX_POST_BYTES) -> dict[str, Any]:
             n = int(self.headers.get("Content-Length") or 0)
-            if n > MAX_POST_BYTES:
+            if n > limit:
                 self.rfile.read(min(n, 1_000_000))   # drain what was sent so the client sees the 413, not a reset
-                raise BodyTooLarge(f"the request body is too large (at most {MAX_POST_BYTES // 1024} KB)")
+                raise BodyTooLarge(f"the request body is too large (at most {limit // 1024} KB)")
             raw = self.rfile.read(n) if n else b""
             body = json.loads(raw.decode() or "{}")
             if not isinstance(body, dict):
@@ -2888,6 +2942,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 self._json(app.portfolio_sectors())
             elif path == "/api/portfolio-analysis":
                 self._json(app.portfolio_analysis())
+            elif path == "/api/groww-reports":
+                self._json(app.groww_reports())
             elif path == "/api/portfolio-news":
                 from .ask import RateLimited
                 try:
@@ -3118,7 +3174,7 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
 
         def _post(self, app: App, path: str) -> None:
             try:
-                body = self._body()
+                body = self._body(REPORT_POST_BYTES if path == "/api/groww-report" else MAX_POST_BYTES)
                 if path in HALT_REFUSED_POSTS:
                     app.halted(f"use {path}")
                 if path == "/api/ask":
@@ -3127,6 +3183,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                         self._json(app.ask(body.get("text"), self.client_address[0], body.get("ticker", body.get("scope_ticker"))))
                     except RateLimited as e:
                         self._json({"error": str(e)}, HTTPStatus.TOO_MANY_REQUESTS)
+                elif path == "/api/groww-report":
+                    self._json(app.import_groww_report(str(body.get("name") or ""), str(body.get("data") or "")))
                 elif path == "/api/kill-switch":
                     self._json(app.kill_switch(body.get("confirm"), body.get("cancel_gtt") is True))
                 elif path == "/api/integration/run":

@@ -75,7 +75,7 @@ def test_new_page_code_has_no_order_post():
             assert needle not in code, (a, needle)
         for args in _api_calls(code):
             assert not _top_level_comma(args), (a, args)   # api(path, body) is a POST; every call here is a one-argument GET
-            assert re.match(r"""\s*[`"']/api/(candles|lookup|costs|size|equity-history|portfolio-sectors|portfolio-analysis|portfolio-news)""", args), (a, args)
+            assert re.match(r"""\s*[`"']/api/(candles|lookup|costs|size|equity-history|portfolio-sectors|portfolio-analysis|portfolio-news|groww-reports)""", args), (a, args)
 
 
 def test_tabs_are_addressable_and_old_anchors_map_into_them():

@@ -1655,6 +1655,28 @@ def cmd_top10_paper(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_groww_report(args: argparse.Namespace) -> int:
+    """Import Groww's Dividend Report (PDF) and Stocks P&L report (xlsx) for the dashboard's Portfolio analysis card."""
+    from . import groww_reports as gr
+    settings = _settings(args)
+    status = 0
+    for name in args.files:
+        try:
+            kind, parsed = gr.parse_report(Path(name).read_bytes())
+        except (OSError, gr.ReportError) as e:
+            print(f"{name}: {e}")
+            status = 1
+            continue
+        gr.save(settings.state_dir, kind, parsed)
+        if kind == "dividends":
+            print(f"{name}: dividends, {len(parsed['rows'])} rows, total {parsed['total']:,.2f}"
+                  + ("" if parsed["check"] in (None, True) else " (the rows do not add up to the report's own total)"))
+        else:
+            print(f"{name}: stocks P&L, {len(parsed['realised'])} realised and {len(parsed['unrealised'])} held lots, "
+                  f"realised {parsed['realised_pnl']:,.2f}, unrealised {parsed['unrealised_pnl']:,.2f}, charges {parsed['charges_total']:,.2f}")
+    return status
+
+
 def cmd_paper_refs(args: argparse.Namespace) -> int:
     """Store the Nifty 50 fund's closes for the Paper accounts tab now (the watch service does it after each close)."""
     from .paper_refs import update
@@ -2574,6 +2596,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("top10-paper", help="variant B's (top 10) paper account (practice money only)")
     sp.add_argument("--run", action="store_true", help="do today's after-close run now (start, monthly rebalance, mark)")
     sp.set_defaults(func=cmd_top10_paper)
+    sp = sub.add_parser("groww-report", help="import Groww's Dividend Report (PDF) and Stocks P&L report (xlsx) for the Portfolio analysis card")
+    sp.add_argument("files", nargs="+", help="the downloaded report files")
+    sp.set_defaults(func=cmd_groww_report)
     sub.add_parser("paper-refs", help="store the Nifty 50 fund's closes for the Paper accounts tab's reference lines").set_defaults(func=cmd_paper_refs)
     sp = sub.add_parser("brake-paper", help="the drawdown brake's (100-day average) paper account (practice money only)")
     sp.add_argument("--run", action="store_true", help="do today's after-close run now (brake check, monthly rebalance, mark)")
