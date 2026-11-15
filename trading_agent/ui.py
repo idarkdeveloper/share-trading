@@ -215,6 +215,7 @@ class App:
         self._members_cache: tuple[float, list[dict[str, str]]] | None = None
         self._caps_cache: tuple[float, dict[str, str]] | None = None   # {SYMBOL: large | mid | small}, 12 hours
         self._reports_cache: tuple[Any, float, dict[str, Any]] | None = None   # the XIRR figures: (reports saved at, when, answer)
+        self._worst_cache: tuple[Any, float, dict[str, Any]] | None = None   # the worst dips of the trades: (orders fingerprint, when, answer)
         from .fundamentals import YahooFundamentals
         from .quote import QuoteService
         self.quote_service = QuoteService(YahooFundamentals(None))  # P/E, market cap, 52-week range; 30 min per ticker
@@ -952,7 +953,7 @@ class App:
             "page": self.page,
             "regime": regime,
             "orders": order_rows[:50],
-            "trade_view": trade_view(order_rows, positions),   # the same fills as trades: closed (buy, sell, P/L) and open (unrealised)
+            "trade_view": trade_view(order_rows, positions, st.data["recommendations"]),   # the same fills as trades: closed (buy, sell, P/L) and open (unrealised), with why / exit notes
             "limit_orders": self.limit_orders(),
             "stop_sells": self.stop_sells(),
             "forward": self.forward_summary(),
@@ -1556,6 +1557,40 @@ class App:
             sectors = {}
         out = analyse(rows, caps=self._cap_classes(), sectors=sectors)
         return {**out, "available": True, "as_of": m.get("prices_as_of") or m.get("at") or m.get("saved_at")}
+
+    TRADE_WORST_TTL_SECONDS = 300.0
+    TRADE_WORST_MAX_SYMBOLS = 25
+
+    def trade_worst(self) -> dict[str, Any]:
+        """GET /api/trade-worst: {"worst": {trade key: {ok, px, pct, on, never} or {ok: False, why}}} for the newest trades, how far below the
+        average buy price each traded while it was held (trade_notes.worst_fall), from daily lows the price service caches. Read-only,
+        kept 5 minutes, and at most TRADE_WORST_MAX_SYMBOLS stocks are looked up per call so a long history never makes the page wait.
+        The page asks for it after the order history has drawn, so the first paint does not depend on Yahoo."""
+        from .trade_notes import worst_fall
+        rows = self.orders(500)
+        trades = trade_view(rows)["trades"]
+        stamp = (len(rows), str(rows[0].get("at")) if rows else None, self.page)
+        hit = self._worst_cache
+        if hit is not None and hit[0] == stamp and time.time() - hit[1] < self.TRADE_WORST_TTL_SECONDS:
+            return hit[2]
+        bars: dict[str, list[dict[str, Any]] | None] = {}
+        worst: dict[str, Any] = {}
+        for t in trades:
+            sym = t["symbol"]
+            if sym not in bars:
+                if len(bars) >= self.TRADE_WORST_MAX_SYMBOLS:
+                    continue
+                try:
+                    bars[sym] = self.prices.history_ohlc(sym, "1y")
+                except Exception as e:  # noqa: BLE001 - a nicety: no history for a stock is a note, not an error
+                    log.info("trade worst dip: no price history for %s: %s", sym, e)
+                    bars[sym] = None
+            b = bars.get(sym)
+            worst[t["key"]] = ({"ok": False, "why": "no price history for this stock"} if b is None else
+                               worst_fall(t["buy_px"], t["buy_at"], b, end_at=t["sell_at"], end_px=t["sell_px"]))
+        out = {"worst": worst, "as_of": _now()}
+        self._worst_cache = (stamp, time.time(), out)
+        return out
 
     REPORTS_TTL_SECONDS = 900.0
 
@@ -2942,6 +2977,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 self._json(app.portfolio_sectors())
             elif path == "/api/portfolio-analysis":
                 self._json(app.portfolio_analysis())
+            elif path == "/api/trade-worst":
+                self._json(app.trade_worst())
             elif path == "/api/groww-reports":
                 self._json(app.groww_reports())
             elif path == "/api/portfolio-news":

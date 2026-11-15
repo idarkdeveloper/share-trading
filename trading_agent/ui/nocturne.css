@@ -1619,6 +1619,13 @@ a.dl-deal:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--color
 .oh-table td.empty { text-align: center; padding: 28px 18px; color: var(--color-muted); } .oh-table td.empty b, .oh-empty b { display: block; color: var(--color-text); margin-bottom: 4px; }
 .oh-empty { padding: 28px 18px; text-align: center; color: var(--color-muted); }
 .oh-cards { display: none; }
+/* notes on each trade: why it was taken, the worst dip while held, how it ended (the Notes column; a line on a phone card) */
+.oh-notes { display: grid; gap: 2px; align-content: start; font-size: 12px; line-height: 1.4; color: var(--color-label); }
+.oh-notes-cell { min-width: 200px; max-width: 320px; }
+.oh-note { display: block; overflow-wrap: anywhere; }
+.oh-note b { color: var(--color-muted); font-weight: 600; margin-right: 4px; }
+.oh-notes-foot { padding: 8px 18px 12px; font-size: 12px; line-height: 1.45; }
+.oh-notes-foot[hidden] { display: none; }
 @media (max-width: 700px) {
   .oh-sum { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 4px 12px 8px; }
   .oh-sum > div:nth-child(3) { border-left: 0; border-top: 1px solid var(--color-divider); } .oh-sum > div:nth-child(4) { border-top: 1px solid var(--color-divider); }
@@ -1631,6 +1638,8 @@ a.dl-deal:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--color
   .oh-c1 { display: flex; align-items: baseline; gap: 8px; } .oh-c1 .sym { font-size: 16px; font-weight: 700; } .oh-c1 .oh-pl { margin-left: auto; font-size: 15px; }
   .oh-c2 { font-size: 13px; color: var(--color-label); font-variant-numeric: tabular-nums; }
   .oh-c3 { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+  .oh-c4.oh-notes { margin-top: 4px; }
+  .oh-notes-foot { padding: 8px 14px 12px; }
 }
 
 /* ---- One top bar (header redesign). Brand, page tabs, Live/Practice, last check and the gear in a single 56 px sticky bar on a desktop;

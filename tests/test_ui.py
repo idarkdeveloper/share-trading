@@ -2103,3 +2103,74 @@ def test_stale_deals_are_served_at_once_and_refreshed_behind_the_page(settings, 
     data.fail = False
     data.trades = trades[:2]
     assert len(app.deals(refresh=True)) == 2 and app._deals_error is None            # an explicit refresh waits for it
+
+
+def _trade_rows():
+    """A closed ABC trade (bought 4 Nov, sold by a trailing stop on 10 Nov), an open NOPE lot that has no price history, newest first."""
+    def row(i, sym, side, px, at, **kw):
+        return {"id": i, "symbol": sym, "side": side, "qty": 10, "filled_avg_price": px, "notional": 10 * px, "fees": 1.0, "status": "filled", "filled_at": at, "at": at, **kw}
+    return [row("n1", "NOPE", "buy", 50.0, "2026-11-05T05:30:00+00:00"),
+            row("s1", "ABC", "sell", 102.0, "2026-11-10T08:30:00+00:00", stop_hit=True, stop_type="trailing", stop_level=101.0),
+            row("b1", "ABC", "buy", 100.0, "2026-11-04T05:30:00+00:00")]
+
+
+def _abc_bars():
+    return [{"date": d, "low": lo, "close": c, "high": c + 2, "open": c} for d, lo, c in
+            (("2026-11-03", 97.0, 99.0), ("2026-11-04", 96.0, 100.0), ("2026-11-05", 94.0, 96.0), ("2026-11-06", 90.0, 95.0),
+             ("2026-11-09", 93.0, 97.0), ("2026-11-10", 99.0, 104.0))]
+
+
+def test_the_state_carries_why_and_how_each_trade_ended_and_the_worst_dip_comes_from_its_own_endpoint(server, monkeypatch):
+    from trading_agent.state import State
+    base, app = server
+    rows = _trade_rows()
+    monkeypatch.setattr(app, "orders", lambda limit=50: rows[:limit])
+    st = State(app.settings.state_dir / "state.json")
+    st.data["recommendations"] = [{"at": "2026-11-03T09:00:00+00:00", "action": "buy", "ticker": "ABC", "headline": "Promoter bought ABC", "confidence": "high"}]
+    st.save()
+    status, snap = _get(base + "/api/state")
+    by_key = {t["key"]: t for t in snap["trade_view"]["trades"]}
+    closed = by_key["closed:s1"]
+    assert closed["why"]["text"] == "Recommended 3 Nov: Promoter bought ABC" and closed["exit"]["text"] == "Trailing stop-loss at 101.00"
+    assert by_key["open:n1"]["why"]["kind"] == "own" and by_key["open:n1"]["exit"] is None
+
+    calls = []
+
+    def ohlc(sym, range_="1y", ttl=None):
+        calls.append(sym)
+        if sym != "ABC":
+            raise LookupError("no history")
+        return _abc_bars()
+    monkeypatch.setattr(app.prices, "history_ohlc", ohlc, raising=False)
+    status, j = _get(base + "/api/trade-worst")
+    assert status == 200 and j["worst"]["closed:s1"] == {"ok": True, "px": 90.0, "pct": -10.0, "on": "2026-11-06", "never": False}
+    assert j["worst"]["open:n1"] == {"ok": False, "why": "no price history for this stock"}
+    assert sorted(calls) == ["ABC", "NOPE"]
+    _get(base + "/api/trade-worst")
+    assert len(calls) == 2                                     # the second answer came from the five-minute cache
+    rows.insert(0, {**rows[0], "id": "n2", "at": "2026-11-11T05:30:00+00:00"})   # a new order: asked again
+    _get(base + "/api/trade-worst")
+    assert len(calls) == 4
+
+
+def test_the_worst_dip_looks_up_a_bounded_number_of_stocks_and_never_errors(server, monkeypatch):
+    base, app = server
+    rows = _trade_rows()
+    monkeypatch.setattr(app, "orders", lambda limit=50: rows[:limit])
+    monkeypatch.setattr(App, "TRADE_WORST_MAX_SYMBOLS", 1)
+    calls = []
+    monkeypatch.setattr(app.prices, "history_ohlc", lambda sym, range_="1y", ttl=None: calls.append(sym) or _abc_bars(), raising=False)
+    status, j = _get(base + "/api/trade-worst")
+    assert status == 200 and calls == ["ABC"] and list(j["worst"]) == ["closed:s1"]      # newest trade first: only its stock was looked up
+    monkeypatch.setattr(app, "orders", lambda limit=50: [])
+    status, j = _get(base + "/api/trade-worst")
+    assert status == 200 and j["worst"] == {}
+
+
+def test_the_order_history_shows_the_notes_and_asks_for_the_worst_dip_after_it_has_drawn():
+    html = (Path(__file__).resolve().parent.parent / "trading_agent" / "ui" / "index.html").read_text(encoding="utf-8")
+    body = html[html.index("// ---- notes on each trade"):html.index("function renderScreen(")]
+    assert "<b>Why</b>" in body and "<b>Worst dip</b>" in body and "<b>Exit</b>" in body
+    assert 'api("/api/trade-worst")' in body and "loadTradeWorst();" in body and "TW[t.key]" in body
+    assert "<th>Notes</th>" in html and 'id="orders-notes-foot"' in html and "tradeNotes(t)" in body
+    assert "never below your buy price" in body and "information only" in html.lower()
