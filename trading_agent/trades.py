@@ -14,6 +14,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from .trade_notes import exit_note, index_recs, why_taken
+
 EPS = 1e-9
 
 
@@ -52,16 +54,24 @@ def normalise(o: dict[str, Any]) -> dict[str, Any] | None:
         return None
     return {"id": str(o.get("id") or o.get("groww_order_id") or ""), "symbol": str(o.get("symbol") or "").upper(), "side": side, "qty": qty, "px": px, "at": str(at or ""),
             "when": _when(at), "fees": fees, "live": live, "stop_hit": bool(o.get("stop_hit")), "stop_type": o.get("stop_type"),
-            "avg_entry": _num(o.get("avg_entry_price")), "broker_pl": _num(o.get("realised_pl"))}
+            "avg_entry": _num(o.get("avg_entry_price")), "broker_pl": _num(o.get("realised_pl")),
+            "stop_level": _num(o.get("stop_level")), "limit": None if live else _num(o.get("limit")), "source": o.get("source")}
 
 
 def _r(v: float | None, d: int = 2) -> float | None:
     return None if v is None else round(v, d)
 
 
-def trade_view(orders: list[dict[str, Any]], positions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def _key(kind: str, f: dict[str, Any]) -> str:
+    """A trade's id for the page: its own order's id, or the stock and time when the order has none."""
+    return f"{kind}:{f['id']}" if f["id"] else f"{kind}:{f['symbol']}:{f['at']}"
+
+
+def trade_view(orders: list[dict[str, Any]], positions: list[dict[str, Any]] | None = None,
+               recommendations: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """{"trades": [...newest first], "summary": {...}}. ``orders`` in any order; ``positions``: [{symbol, current_price?}] for the "now" price of open trades
-    (a trade without one has now_px None and no unrealised P/L)."""
+    (a trade without one has now_px None and no unrealised P/L); ``recommendations``: the saved ones, which are where a trade's ``why`` comes from."""
+    recs = index_recs(recommendations)
     fills = [n for n in (normalise(o) for o in orders or []) if n]
     # oldest first; the list is usually newest first, so a tie keeps the later position in the list as the earlier fill
     order = sorted(range(len(fills)), key=lambda i: (fills[i]["when"], -i))
@@ -102,7 +112,8 @@ def trade_view(orders: list[dict[str, Any]], positions: list[dict[str, Any]] | N
         trades.append({"kind": "closed", "symbol": sym, "qty": f["qty"], "buy_at": first["at"] if first else None, "buy_px": cost / f["qty"],
                        "sell_at": f["at"], "sell_px": f["px"], "now_px": None, "gross": gross, "fees": fees, "net": net, "pct": net / cost * 100 if cost > EPS else None,
                        "reason": "stop-loss" if f["stop_hit"] else "manual", "stop_type": f["stop_type"] if f["stop_hit"] else None, "live": f["live"],
-                       "paired": need <= EPS, "broker_pl": f["broker_pl"], "at": f["at"], "ids": [f["id"]]})
+                       "paired": need <= EPS, "broker_pl": f["broker_pl"], "at": f["at"], "ids": [f["id"]], "key": _key("closed", f),
+                       "why": why_taken(first, recs) if first else {"kind": "unknown", "text": "Bought before this history starts"}, "exit": exit_note(f)})
     for sym, ls in lots.items():
         for lot in ls:
             if lot["left"] <= EPS:
@@ -113,7 +124,8 @@ def trade_view(orders: list[dict[str, Any]], positions: list[dict[str, Any]] | N
             trades.append({"kind": "open", "symbol": sym, "qty": lot["left"], "buy_at": lf["at"], "buy_px": lf["px"], "sell_at": None, "sell_px": None, "now_px": now,
                            "gross": gross, "fees": None if lf["fees"] is None else lf["fees"] * lot["left"] / lf["qty"], "net": gross,
                            "pct": gross / cost * 100 if gross is not None and cost > EPS else None, "reason": None, "stop_type": None, "live": lf["live"],
-                           "paired": True, "broker_pl": None, "at": lf["at"], "ids": [lf["id"]]})
+                           "paired": True, "broker_pl": None, "at": lf["at"], "ids": [lf["id"]], "key": _key("open", lf),
+                           "why": why_taken(lf, recs), "exit": None})
     trades.sort(key=lambda t: _when(t["at"]), reverse=True)
     for t in trades:
         for k in ("qty", "buy_px", "sell_px", "now_px", "gross", "fees", "net", "pct", "broker_pl"):

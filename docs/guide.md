@@ -146,6 +146,22 @@ It then shows:
 The reports cover the period you chose when downloading them; the card shows that period. Import them again after a new
 download to refresh. (`/api/groww-reports`, `POST /api/groww-report`.)
 
+**Notes on each trade** (Deals & orders, *Order history*, **Trades** view) say three things beside every trade, for
+information only (nothing here places an order or feeds a rule):
+
+- **Why:** the newest *buy* recommendation for that stock in the 10 days before the buy ("Recommended 3 Nov: ..."; hover for
+  its rationale). With none, the order's own source: a limit order you set, the agent, or "your own order". A recommendation
+  that came before a buy is a likely reason, not proof of one.
+- **Worst dip:** how far below your average buy price the stock traded while you held it, with the price and day. It uses each
+  day's lowest price in the days between the buy and the sell, plus the two fill prices; a daily bar does not say whether its
+  low came before or after your fill, so moves inside the buy day and the sell day are not counted and a real dip can be a little
+  deeper. "Never below your buy price" means it did not trade lower. It reads "n/a" (hover for the reason) when the price
+  history does not reach back to the buy (about a year is kept), has no data for the stock, or has been rescaled by a split or
+  bonus since. It is asked for after the table has drawn (`/api/trade-worst`, read-only, kept 5 minutes, at most 25 stocks per
+  call), so the page never waits on Yahoo for it.
+- **Exit** (closed trades): a stop-loss (trailing, fixed or percent, and the level), your limit order, the agent, or sold by
+  hand. A real Groww sale made by a GTT stop is not marked as such in Groww's order list, so it reads "reason not recorded".
+
 **Demo** (`/demo`) is the same page on the same real data (same regime, deals, recommendations, look-up, news and
 My Groww portfolio) with the practice account added: the practice portfolio (account-value chart, positions, order
 form), practice tiles and "Paper buy/sell" buttons on recommendations. The practice account is

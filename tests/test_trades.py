@@ -115,3 +115,35 @@ def test_it_never_changes_its_input(n):
     before = copy.deepcopy(orders)
     trade_view(orders, POS)
     assert orders == before
+
+
+# ---- notes: why it was taken, how it ended, and the id the page joins the worst dip on ----
+def test_trades_carry_a_key_a_reason_and_how_they_ended():
+    recs = [{"action": "buy", "ticker": "VOGL", "at": "2026-10-10T09:00:00+00:00", "headline": "Promoter bought VOGL", "confidence": "high"}]
+    v = trade_view(OWNER, POS, recs)
+    vogl = next(t for t in v["trades"] if t["kind"] == "closed")
+    assert vogl["key"] == "closed:VOGL-sell-2026-10-19T03:57:00+00:00"
+    assert vogl["why"]["kind"] == "recommendation" and vogl["why"]["text"].endswith("Promoter bought VOGL")
+    assert vogl["exit"] == {"kind": "stop", "text": "Trailing stop-loss at 30.90", "stop_type": "trailing", "level": 30.9}
+    tcs = next(t for t in v["trades"] if t["symbol"] == "TCS")
+    assert tcs["key"] == "open:TCS-buy-2026-10-19T04:17:00+00:00" and tcs["exit"] is None and tcs["why"]["kind"] == "own"
+    assert len({t["key"] for t in v["trades"]}) == len(v["trades"])
+    assert trade_view(OWNER, POS)["trades"][0]["why"]["kind"] == "own"          # no recommendations passed: still a note, never an error
+
+
+def test_a_limit_fill_and_a_manual_sale_say_so_and_a_real_orders_limit_price_is_not_a_choice():
+    v = trade_view([o("ABC", "buy", 10, 100, 1.0, "2026-10-10T04:00:00+00:00", limit=101.0, limit_order="L1"),
+                    o("ABC", "sell", 10, 110, 1.0, "2026-10-12T04:00:00+00:00", limit=110.0, limit_order="L2"),
+                    o("DEF", "buy", 5, 50, 1.0, "2026-10-10T04:00:00+00:00"), o("DEF", "sell", 5, 55, 1.0, "2026-10-12T04:00:00+00:00")])
+    abc = next(t for t in v["trades"] if t["symbol"] == "ABC")
+    assert abc["why"]["text"] == "Your limit order at 101.00" and abc["exit"]["text"] == "Your limit order at 110.00"
+    assert next(t for t in v["trades"] if t["symbol"] == "DEF")["exit"]["text"] == "Sold by hand"
+    live = {"live": True, "average_fill_price": 100, "limit_price": 100, "filled_quantity": 3}
+    g = trade_view([{**live, "groww_order_id": "G1", "symbol": "XYZ", "side": "buy", "placed_at": "2026-10-10T04:00:00+00:00", "source": "agent"},
+                    {**live, "groww_order_id": "G2", "symbol": "XYZ", "side": "sell", "placed_at": "2026-10-12T04:00:00+00:00"}])["trades"][0]
+    assert g["why"]["text"] == "Placed by the agent" and g["exit"]["text"] == "Reason not recorded"
+
+
+def test_a_sale_the_history_cannot_pair_says_the_buy_is_older_and_an_order_without_an_id_still_gets_a_key():
+    t = trade_view([{"symbol": "OLD", "side": "sell", "qty": 5, "filled_avg_price": 120, "fees": 1.0, "status": "filled", "filled_at": "2026-10-19T04:00:00+00:00"}])["trades"][0]
+    assert t["why"] == {"kind": "unknown", "text": "Bought before this history starts"} and t["key"] == "closed:OLD:2026-10-19T04:00:00+00:00"

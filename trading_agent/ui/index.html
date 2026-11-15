@@ -212,6 +212,7 @@
         <div class="oh-sum" id="orders-sum" role="group" aria-label="Summary" hidden></div>
         <div class="scroll tscroll"><table class="dt oh-table"><thead id="orders-head"></thead><tbody id="orders"></tbody></table></div>
         <div class="oh-cards" id="orders-cards"></div>
+        <div class="sub oh-notes-foot" id="orders-notes-foot" hidden>Notes are for information only. <b>Why</b>: the newest buy recommendation in the 10 days before the buy, else how the order was placed. <b>Worst dip</b>: the lowest daily price between the buy and the sell, against your average buy price; moves inside the buy day and the sell day are not counted, so a real dip can be a little deeper. <b>Exit</b>: what sold it.</div>
         <div class="cardfoot" id="orders-foot" hidden><button type="button" class="small" id="orders-more">Show more</button><span class="sub" id="orders-count"></span></div>
       </div>
       <div class="card" data-anchor="runs">
@@ -1198,7 +1199,7 @@
   let ordersLimit = 10, ordersView = "trades";   // the latest 10, then Show more; Trades (one row per trade) or All orders (every fill)
   try { if(localStorage.getItem("ordersView") === "all") ordersView = "all"; } catch(e){}
   const OH_HEAD_ALL = "<tr><th>Time</th><th>Order</th><th class=\"num\">Price</th><th class=\"num\">Value</th><th class=\"num\">Charges</th><th>Status</th></tr>";
-  const OH_HEAD_TRADES = "<tr><th>Date</th><th>Stock</th><th class=\"num\">Qty</th><th class=\"num\">Buy price</th><th class=\"num\">Sell / now</th><th class=\"num\">P/L</th><th class=\"num\">Charges</th><th>Status</th></tr>";
+  const OH_HEAD_TRADES = "<tr><th>Date</th><th>Stock</th><th class=\"num\">Qty</th><th class=\"num\">Buy price</th><th class=\"num\">Sell / now</th><th class=\"num\">P/L</th><th class=\"num\">Charges</th><th>Status</th><th>Notes</th></tr>";
   const dayOf = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString("en-GB", {day: "numeric", month: "short", timeZone: "Asia/Kolkata"}); };
   const hmOf = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleTimeString("en-GB", {hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata"}); };
   const nowOf = (t) => { if(t.now_px != null) return t.now_px; const h = (MP && MP.holdings || []).find(x => bareCode(x.symbol) === bareCode(t.symbol)); return h && h.price != null ? Number(h.price) : null; };
@@ -1213,6 +1214,29 @@
   const tsgn = (v) => v == null ? "n/a" : (v > 0 ? "+" : v < 0 ? "−" : "") + inr(Math.abs(v), Math.abs(v) < 100 ? 2 : 0);
   const tpct = (v) => v == null ? "" : (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(2) + "%";
   function tradeStatus(t){ return t.kind === "open" ? '<span class="oh-chip open">Open</span>' : `<span class="oh-chip ${t.reason === "stop-loss" ? "warn" : ""}">Closed · ${esc(t.reason || "manual")}</span>`; }
+  // ---- notes on each trade (information only): why it was taken, the worst dip while it was held, how it ended ----
+  let TW = {}, twAt = 0, twCount = -1, twBusy = false;   // TW: trade key -> worst dip from /api/trade-worst, asked for once the table has drawn
+  function dipText(w){
+    if(w.ok === false) return "n/a";
+    if(w.never) return "never below your buy price";
+    return `${tpct(w.pct)} (${inr(w.px, 2)}${w.on ? " on " + dayOf(w.on + "T12:00:00+05:30") : ""})`;
+  }
+  function tradeNotes(t){
+    const lines = [];
+    if(t.why) lines.push(`<span class="oh-note"${t.why.rationale ? ` title="${esc(t.why.rationale)}"` : ""}><b>Why</b> ${esc(t.why.text)}</span>`);
+    const w = TW[t.key];
+    if(w) lines.push(`<span class="oh-note"${w.ok === false ? ` title="${esc(w.why || "")}"` : ""}><b>Worst dip</b> ${esc(dipText(w))}</span>`);
+    if(t.kind === "closed" && t.exit) lines.push(`<span class="oh-note"><b>Exit</b> ${esc(t.exit.text)}</span>`);
+    return lines.join("");
+  }
+  async function loadTradeWorst(){
+    const n = ((S && S.trade_view && S.trade_view.trades) || []).length;
+    if(twBusy || !n || (n === twCount && Date.now() - twAt < 300000)) return;
+    twBusy = true;
+    try { const r = await api("/api/trade-worst"); TW = (r && r.worst) || {}; } catch(e){}
+    twBusy = false; twCount = n; twAt = Date.now();
+    renderOrders();
+  }
   function tradeRows(trades){
     return trades.map((t) => { const f = tradeFacts(t), when = t.kind === "closed" ? t.sell_at : t.buy_at;
       return `<tr data-open-stock="${esc(t.symbol)}"><td>${esc(dayOf(when))}<span class="oh-sub">${t.kind === "closed" ? `sold ${esc(dayOf(t.sell_at))}${t.buy_at ? ", bought " + esc(dayOf(t.buy_at)) : ""}` : `bought ${esc(hmOf(t.buy_at))} IST`}</span></td>
@@ -1220,14 +1244,14 @@
         <td class="num">${esc(Number(t.qty).toLocaleString("en-IN"))}</td><td class="num">${inr(t.buy_px, 2)}</td>
         <td class="num">${t.kind === "closed" ? inr(t.sell_px, 2) : f.now != null ? inr(f.now, 2) : "n/a"}<span class="oh-sub">${t.kind === "closed" ? "sold " + esc(dayOf(t.sell_at)) : "now"}</span></td>
         <td class="num">${f.net == null ? '<span class="sub">n/a</span>' : `<span class="oh-pl ${f.up ? "up" : "down"}">${f.up ? "▲" : "▼"} ${f.word} ${tsgn(f.net)}<small>${tpct(f.pct)}${t.kind === "open" ? " unrealised" : t.fees == null ? "" : " after charges"}</small></span>`}</td>
-        <td class="num">${t.fees == null ? '<span class="sub">n/a</span>' : money(t.fees, 2)}</td><td>${tradeStatus(t)}</td></tr>`; }).join("");
+        <td class="num">${t.fees == null ? '<span class="sub">n/a</span>' : money(t.fees, 2)}</td><td>${tradeStatus(t)}</td><td class="oh-notes-cell"><div class="oh-notes">${tradeNotes(t)}</div></td></tr>`; }).join("");
   }
   function tradeCards(trades){
     return trades.map((t) => { const f = tradeFacts(t);
       return `<a class="oh-card" href="/?stock=${encodeURIComponent(t.symbol)}" data-lookup="${esc(t.symbol)}" aria-label="${esc(t.symbol)}, ${f.net == null ? "no price" : f.word + " " + tsgn(f.net)}. Open the stock page">
         <span class="oh-c1"><span class="sym">${esc(t.symbol)}</span>${f.net == null ? '<span class="oh-pl sub">n/a</span>' : `<span class="oh-pl ${f.up ? "up" : "down"}">${f.up ? "▲" : "▼"} ${f.word} ${tsgn(f.net)} (${tpct(f.pct)})</span>`}</span>
         <span class="oh-c2">${t.kind === "closed" ? `Bought ${t.buy_at ? esc(dayOf(t.buy_at)) : "earlier"} @ ${esc(inr(t.buy_px, 2).replace("₹", ""))} → Sold ${esc(dayOf(t.sell_at))} @ ${esc(inr(t.sell_px, 2).replace("₹", ""))} · ${esc(Number(t.qty).toLocaleString("en-IN"))} sh` : `Bought ${esc(dayOf(t.buy_at))} @ ${esc(inr(t.buy_px, 2).replace("₹", ""))} · now ${f.now != null ? esc(inr(f.now, 2).replace("₹", "")) : "n/a"} · ${esc(Number(t.qty).toLocaleString("en-IN"))} sh`}</span>
-        <span class="oh-c3">${tradeStatus(t)}${t.kind === "open" ? '<span class="oh-chip">unrealised</span>' : ""}<span class="oh-chip">charges ${t.fees == null ? "n/a" : money(t.fees, 2)}</span><span class="oh-chip">${t.live ? "Groww" : "paper"}</span></span></a>`; }).join("");
+        <span class="oh-c3">${tradeStatus(t)}${t.kind === "open" ? '<span class="oh-chip">unrealised</span>' : ""}<span class="oh-chip">charges ${t.fees == null ? "n/a" : money(t.fees, 2)}</span><span class="oh-chip">${t.live ? "Groww" : "paper"}</span></span>${tradeNotes(t) ? `<span class="oh-c4 oh-notes">${tradeNotes(t)}</span>` : ""}</a>`; }).join("");
   }
   function orderCards(rows){
     return rows.map((x) => `<a class="oh-card" href="/?stock=${encodeURIComponent(x.symbol)}" data-lookup="${esc(x.symbol)}"><span class="oh-c1"><span class="side-chip ${x.side === "sell" ? "sell" : "buy"}">${esc(String(x.side || "").toUpperCase())}</span><span class="sym">${esc(x.symbol)}</span><span class="oh-pl">${money(x.notional)}</span></span>
@@ -1250,11 +1274,13 @@
         <div><span>Fees paid</span><b>${chg == null ? "n/a" : money(chg, 2)}</b><small>${chg == null ? "Groww does not report them here" : "buy + sell, all orders"}</small></div>`;
     }
     $("orders-head").innerHTML = ordersView === "trades" ? OH_HEAD_TRADES : OH_HEAD_ALL;
-    const colspan = ordersView === "trades" ? 8 : 6;
+    const colspan = ordersView === "trades" ? 9 : 6;
+    const nf = $("orders-notes-foot"); if(nf) nf.hidden = !(ordersView === "trades" && shown.length);
     $("orders-cards").innerHTML = shown.length ? (ordersView === "trades" ? tradeCards(shown) : orderCards(shown)) : "";
     if(ordersView === "trades"){ $("orders").innerHTML = shown.length ? tradeRows(shown) : `<tr><td colspan="${colspan}" class="empty"><b>No orders yet</b>${MODE === "demo" ? "Practice trades appear here, with what you paid, what you got and the profit or loss." : "Your real Groww orders appear here once the agent has placed some."}</td></tr>`;
       if(!shown.length) $("orders-cards").innerHTML = `<div class="oh-empty"><b>No orders yet</b>${MODE === "demo" ? "Practice trades appear here, with what you paid, what you got and the profit or loss." : "Your real Groww orders appear here once the agent has placed some."}</div>`;
       $("orders-foot").hidden = list.length <= 10; $("orders-more").hidden = list.length <= ordersLimit; $("orders-count").textContent = list.length > 10 ? `showing ${shown.length} of ${list.length}` : "";
+      loadTradeWorst();
       return; }
     $("orders").innerHTML = shown.length ? shown.map(x => `<tr data-open-stock="${esc(x.symbol)}"><td class="sub nowrap">${when(x.at || x.filled_at)}</td>
       <td class="nowrap"><span class="side-chip ${x.side==="sell"?"sell":"buy"}">${esc(String(x.side||"").toUpperCase())}</span> <a href="#" data-lookup="${esc(x.symbol)}" class="sym">${esc(x.symbol)}</a> <span class="sub">× ${esc(String(x.qty != null ? x.qty : x.filled_quantity || ""))}</span></td>
