@@ -5,6 +5,7 @@ import pytest
 import requests
 
 from trading_agent.nse import NSEClient, _iso, _norm_deal, _norm_insider
+from trading_agent.quiver import filter_by_investor
 from .conftest import FakeSession
 
 FX = Path(__file__).resolve().parents[1] / "trading_agent" / "fixtures" / "nse_deals_sample.json"
@@ -146,11 +147,12 @@ def test_insider_feed_uses_xbrl_after_may_2026_and_caches(tmp_path):
     c2 = NSEClient(session=sess2, cache_dir=tmp_path, sleep=sleeps.append)
     assert len(c2.insider_trades(30, end=date(2026, 10, 9))) == 2
     assert not any("WebXMLFile_A" in u for _, u, _ in sess2.calls)
-    # a window that starts before May 2026 also reads the old JSON feed
-    both = c2.trades_for_investor("parekh", "insider", days=200)
+    # a window that starts before May 2026 also reads the old JSON feed. The end date is fixed: "200 days back from today" only
+    # starts before May 2026 until mid-November, and this test failed on the first day after that
+    both = filter_by_investor(c2.insider_trades(200, end=date(2026, 10, 9)), "parekh")
     assert [t.ticker for t in both] == ["INFY"]
     # watched investor matching works on the new feed
-    assert [t.ticker for t in c2.trades_for_investor("radhakishan", "insider")] == ["DMART"]
+    assert [t.ticker for t in filter_by_investor(c2.insider_trades(30, end=date(2026, 10, 9)), "radhakishan")] == ["DMART"]
 
 
 def test_insider_feed_backs_off_when_nse_refuses(tmp_path):
