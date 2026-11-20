@@ -2353,7 +2353,9 @@ def cmd_digest(args: argparse.Namespace) -> int:
 
 def cmd_ui(args: argparse.Namespace) -> int:
     """Serve the local dashboard."""
+    from . import fdwatch
     from .ui import serve
+    fdwatch.raise_limit()   # a service starts at 1024 open files; the dashboard keeps a socket per open browser tab
     settings = _settings(args)
     serve(settings, host=args.host, port=args.port, open_browser=not args.no_open, demo=args.demo)
     return 0

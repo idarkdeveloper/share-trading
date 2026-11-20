@@ -13,6 +13,7 @@ Environment=TZ=Asia/Kolkata
 ExecStart=/opt/trading-agent/.venv/bin/python -m trading_agent watch
 Restart=on-failure
 RestartSec=30
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target
