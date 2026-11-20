@@ -395,6 +395,26 @@ with `-v`), only "heartbeat ok" / "heartbeat failed". After changing `HEARTBEAT_
 
 Better Stack and UptimeRobot heartbeat monitors work the same way: paste their heartbeat URL (it must be `https://`).
 
+**"Too many open files" (`OSError: [Errno 24]`)**
+
+A service starts with a limit on open files (1024 under systemd). Sockets, pipes and files all count. When the watch reaches
+it, it cannot even open `state/state.json`, every tick fails, and the heartbeat gets a `/fail` with that text (this is what
+the 20 Nov alert said). The process keeps running, so systemd does not restart it by itself. What the app does now:
+
+- **The limit is lifted at start.** The watch and the dashboard raise their own soft limit to 65536 (or the hard limit if
+  lower), and the unit files carry `LimitNOFILE=65536`. To take the unit files:
+  `sudo cp deploy/systemd/*.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart trading-agent-watch trading-agent-dashboard`.
+- **The watch counts its open files every tick.** From half the limit it logs what they are, at most every 30 minutes:
+  `journalctl -u trading-agent-watch | grep "open files"`. A line like `open files 600 of 65536: socket CLOSE_WAIT to
+  104.16.1.1:443 x580, ...` names the leak: CLOSE_WAIT sockets are connections the other side has closed and this program
+  never did, and the address says which service they go to. From 70% it tries one garbage collection and sends **one alert a
+  day** (Telegram or email, whichever is set), then the log lines above say what holds the files.
+- **The failure ping says what held them** when it can: `... Too many open files | open files 1019 of 1024: socket CLOSE_WAIT ...`
+  (the last breakdown, since listing the handles needs a handle).
+
+If the alert comes, restart the watch (`sudo systemctl restart trading-agent-watch`) and send the `open files` log lines.
+To look by hand before restarting: `sudo ls -l /proc/$(systemctl show -p MainPID --value trading-agent-watch)/fd | awk '{print $NF}' | sed 's/[0-9]\+/N/g' | sort | uniq -c | sort -rn | head`.
+
 ---
 
 ## 13. Telegram alerts

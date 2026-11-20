@@ -7,6 +7,7 @@ machine with a fixed IP (the April 2026 SEBI rules) rather than a cron runner.
 
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import re
@@ -15,7 +16,7 @@ import time
 from datetime import datetime, time as dtime, timedelta, timezone, tzinfo
 from typing import Any, Callable
 
-from . import killswitch
+from . import fdwatch, killswitch
 from .config import Settings
 from .groww import GrowwTokenUnavailable, warn_token_block_once
 from .risk import check_stops
@@ -119,6 +120,7 @@ class Watcher:
         self._heartbeat = heartbeat  # Heartbeat: pings the dead-man URL every minute, at all hours
         self._broker = broker
         self._notifier = notifier
+        self._fd = fdwatch.Monitor(alert=self._fd_alert)   # open files: counted every tick, named from half the limit
         self._stop = threading.Event()
         self._halt_logged = False
         self._thread: threading.Thread | None = None
@@ -494,6 +496,10 @@ class Watcher:
             out["gtt"] = [{"action": "error", "error": str(e)}]
         return out
 
+    def _fd_alert(self, subject: str, body: str) -> None:
+        if self._notifier is not None:
+            self._notifier.send(subject, body)
+
     def ensure_broker(self) -> Any | None:
         """The broker, built now if it could not be at start (Groww refusing a login token). While it cannot
         be built the watch runs alerts-only: deals, announcements and news, with a single warning per block."""
@@ -815,9 +821,13 @@ class Watcher:
                                       allowance=lambda: self._step_allow)
             except Exception:  # noqa: BLE001 - the dead-man ping never stops the watch
                 log.warning("heartbeat thread did not start")
+        before, after = fdwatch.raise_limit()   # systemd starts a service at 1024 open files; lift it towards the hard limit
+        if after and after != before:
+            log.info("open-file limit raised from %s to %s", before, after)
         while not self._stop.is_set():
             self._progress = time.monotonic()
             self._tick_started = datetime.now(self.tz).isoformat(timespec="seconds")
+            self._fd.tick()
             error: str | None = None
             raised: str | None = None
             self._write_alive(self._last_error)
@@ -828,6 +838,8 @@ class Watcher:
             except Exception as e:  # noqa: BLE001
                 log.exception("watch tick failed")
                 error = raised = f"{type(e).__name__}: {e}"
+                if isinstance(e, OSError) and e.errno == errno.EMFILE:   # out of handles: say what held them
+                    error = raised = f"{raised} | {fdwatch.failure_note(self._fd)}"
             self._mark("idle")
             self._tick_finished = datetime.now(self.tz).isoformat(timespec="seconds")
             self._last_error = error
